@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
+import { handleFirestoreError } from '../lib/errorHandlers';
 import { Plus, Edit2, Trash2, Search, Tag, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle } from 'lucide-react';
 
 interface UnifiedEvent {
@@ -100,7 +101,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       setAnimals(animalsData);
       setIsLoading(false);
     }, (error) => {
-      console.error("Error fetching animals:", error);
+      console.error("Error fetching animals:", error?.message || error);
       setIsLoading(false);
     });
 
@@ -193,8 +194,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       }
       handleCloseModal();
     } catch (error) {
-      console.error("Error saving animal:", error);
-      alert("Error al guardar el animal");
+       handleFirestoreError(error, editingAnimal ? 'update' : 'create', `farms/${farmId}/animals`, auth);
+    } finally {
+       setIsSubmitting(false);
     }
   };
 
@@ -209,22 +211,24 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const confirmDelete = async () => {
     if (!animalToDelete) return;
+    setIsSubmitting(true);
     try {
       await deleteDoc(doc(db, `farms/${farmId}/animals`, animalToDelete));
       setIsConfirmDeleteOpen(false);
       setAnimalToDelete(null);
     } catch (error) {
-      console.error("Error deleting animal:", error);
-      alert("Error al eliminar el animal");
+      handleFirestoreError(error, 'delete', `farms/${farmId}/animals/${animalToDelete}`, auth);
       setIsConfirmDeleteOpen(false);
       setAnimalToDelete(null);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const confirmBatchDelete = async () => {
     if (selectedAnimals.length === 0) return;
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
       const batch = writeBatch(db);
       selectedAnimals.forEach(id => {
         batch.delete(doc(db, `farms/${farmId}/animals`, id));
@@ -232,21 +236,21 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       await batch.commit();
       setSelectedAnimals([]);
       setIsConfirmBatchDeleteOpen(false);
-      setIsSubmitting(false);
     } catch (error) {
-      console.error("Error deleting batch:", error);
-      alert("Error al eliminar los animales seleccionados");
+      handleFirestoreError(error, 'write', `farms/${farmId}/animals`, auth);
       setIsConfirmBatchDeleteOpen(false);
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filteredAnimals = animals.filter(a => 
-    a.tagNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.breed.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (a.batch && a.batch.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredAnimals = animals.filter(a => {
+    const sTerm = (searchTerm || '').toLowerCase();
+    return (a.tagNumber || '').toLowerCase().includes(sTerm) ||
+           (a.category || '').toLowerCase().includes(sTerm) ||
+           (a.breed || '').toLowerCase().includes(sTerm) ||
+           (a.batch && a.batch.toLowerCase().includes(sTerm));
+  });
 
   // Stats
   const totalAnimals = animals.filter(a => a.status === 'Activo').length;
@@ -380,8 +384,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       placeholder="Buscar..."
                       className="w-full p-2 border border-stone-300 rounded-lg"
                       onChange={e => {
-                        const term = e.target.value.toLowerCase();
-                        const found = animals.find(a => a.tagNumber.toLowerCase().includes(term));
+                        const term = (e.target.value || '').toLowerCase();
+                        const found = animals.find(a => (a.tagNumber || '').toLowerCase().includes(term));
                         if (found && !selectedAnimalsForAction.find(a => a.id === found.id)) {
                           setSelectedAnimalsForAction([...selectedAnimalsForAction, found]);
                         }

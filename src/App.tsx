@@ -2,19 +2,24 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MapPin, User, Building2, Plus, Trash2, 
   ArrowLeft, Sprout, CloudRain, Wallet, Info, LayoutGrid,
-  Droplets, Receipt, Edit, Filter, X, LogOut, Mail, Lock, AlertCircle, Camera, Save,
-  Menu, ChevronRight
+  Droplets, Receipt, Edit, Filter, X, LogOut, Mail, Lock, AlertCircle, Camera, Save, Wrench,
+  Menu, ChevronRight, Home, Map, Truck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LocationPicker from './components/LocationPicker';
 import GanaderiaModule from './components/GanaderiaModule';
 import IngresosModule from './components/IngresosModule';
+import DashboardModule from './components/DashboardModule';
+import MapasModule from './components/MapasModule';
+import AgriculturaModule from './components/AgriculturaModule';
+import MaquinariaModule from './components/MaquinariaModule';
 import { auth, db } from './firebase';
 import { 
   signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider, User as FirebaseUser,
   createUserWithEmailAndPassword, signInWithEmailAndPassword
 } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { handleFirestoreError } from './lib/errorHandlers';
 
 // --- ERROR HANDLING ---
 enum OperationType {
@@ -70,6 +75,7 @@ interface ExpenseRecord {
   category: string;
   description: string;
   amount: number;
+  machineId?: string;
 }
 
 interface IncomeRecord {
@@ -85,6 +91,13 @@ interface UserProfile {
   lastName: string;
   profession: string;
   photoBase64: string;
+}
+
+interface Machine {
+  id: string;
+  name: string;
+  type: string;
+  brand: string;
 }
 
 interface Farm {
@@ -122,6 +135,7 @@ export default function AgroApp() {
   const [profileError, setProfileError] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [globalError, setGlobalError] = useState('');
+  const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Modal State
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
@@ -133,9 +147,16 @@ export default function AgroApp() {
   const [rainForm, setRainForm] = useState({ date: '', mm: '' });
   const [rainFilters, setRainFilters] = useState({ startDate: '', endDate: '' });
 
-  const [expenseForm, setExpenseForm] = useState({ date: '', category: 'Gastos generales', description: '', amount: '' });
+  const [expenseForm, setExpenseForm] = useState({ 
+    date: '', 
+    category: 'Gastos generales', 
+    description: '', 
+    amount: '',
+    machineId: ''
+  });
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [expenseFilters, setExpenseFilters] = useState({ category: 'Todos', startDate: '', endDate: '' });
+  const [machines, setMachines] = useState<Machine[]>([]);
 
   const handleError = (error: unknown, operationType: OperationType, path: string | null) => {
     const errInfo: FirestoreErrorInfo = {
@@ -156,7 +177,7 @@ export default function AgroApp() {
       operationType,
       path
     };
-    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    console.error('Firestore Error: ', errInfo.error);
     setGlobalError(errInfo.error);
   };
 
@@ -213,6 +234,24 @@ export default function AgroApp() {
       unsubscribeProfile();
     };
   }, [user, isAuthReady]);
+
+  useEffect(() => {
+    if (!selectedFarmId) {
+      setMachines([]);
+      return;
+    }
+
+    const q = query(collection(db, 'farms', selectedFarmId, 'machines'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loaded: Machine[] = [];
+      snapshot.forEach((doc) => {
+        loaded.push({ id: doc.id, ...doc.data() } as Machine);
+      });
+      setMachines(loaded);
+    });
+
+    return () => unsubscribe();
+  }, [selectedFarmId]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -295,10 +334,10 @@ export default function AgroApp() {
       setShowProfileModal(false);
     } catch (error: any) {
       console.error("Error saving profile", error);
-      const errorMessage = error?.message || 'Error desconocido';
+      const errorMessage = error?.message || '';
       if (errorMessage === 'timeout') {
         setProfileError('Tiempo de espera agotado. Verifica tu conexión a internet o asegúrate de haber creado la base de datos Firestore en la consola de Firebase.');
-      } else if (errorMessage.includes('permissions') || errorMessage.includes('Missing or insufficient permissions')) {
+      } else if (errorMessage && (errorMessage.toLowerCase().includes('permissions') || errorMessage.toLowerCase().includes('missing or insufficient permissions'))) {
         setProfileError('Error de permisos: Asegúrate de actualizar las reglas de Firestore en tu consola de Firebase para permitir escribir en la colección "users".');
       } else {
         setProfileError(`Error al guardar el perfil: ${errorMessage}`);
@@ -335,12 +374,9 @@ export default function AgroApp() {
 
   const handleFarmSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('handleFarmSubmit called', { farmForm, user });
-    if (!farmForm.name || !user) {
-      console.log('handleFarmSubmit: missing name or user', { name: farmForm.name, user });
-      return;
-    }
+    if (!farmForm.name || !user) return;
     
+    setIsActionLoading(true);
     try {
       if (isEditingFarm && selectedFarmId) {
         await updateDoc(doc(db, 'farms', selectedFarmId), {
@@ -363,10 +399,13 @@ export default function AgroApp() {
           rains: [],
           expenses: []
         });
+        setSelectedFarmId(newFarmRef.id);
       }
       setFarmForm({ name: '', location: '', coordinates: '', owner: '', manager: '' });
     } catch (error) {
-      handleError(error, OperationType.WRITE, 'farms');
+       handleFirestoreError(error, 'write' as any, 'farms', auth);
+    } finally {
+       setIsActionLoading(false);
     }
   };
 
@@ -389,12 +428,23 @@ export default function AgroApp() {
   };
 
   const deleteFarm = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'farms', id));
-      if (selectedFarmId === id) setSelectedFarmId(null);
-    } catch (error) {
-      handleError(error, OperationType.DELETE, `farms/${id}`);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Eliminar Establecimiento',
+      message: '¿Estás seguro de eliminar este establecimiento? Esta acción borrará permanentemente todos los datos asociados.',
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          await deleteDoc(doc(db, 'farms', id));
+          if (selectedFarmId === id) setSelectedFarmId(null);
+        } catch (error) {
+          handleFirestoreError(error, 'delete' as any, `farms/${id}`, auth);
+        } finally {
+          setIsActionLoading(false);
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   // --- RAIN ACTIONS ---
@@ -403,6 +453,7 @@ export default function AgroApp() {
     e.preventDefault();
     if (!selectedFarmId || !rainForm.date || !rainForm.mm || !selectedFarm) return;
     
+    setIsActionLoading(true);
     try {
       const newRain = { id: crypto.randomUUID(), date: rainForm.date, mm: Number(rainForm.mm) };
       const updatedRains = [...selectedFarm.rains, newRain].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -410,18 +461,31 @@ export default function AgroApp() {
       await updateDoc(doc(db, 'farms', selectedFarmId), { rains: updatedRains });
       setRainForm({ date: '', mm: '' });
     } catch (error) {
-      handleError(error, OperationType.UPDATE, `farms/${selectedFarmId}`);
+       handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
+    } finally {
+       setIsActionLoading(false);
     }
   };
 
   const deleteRain = async (rainId: string) => {
-    if (!selectedFarm) return;
-    try {
-      const updatedRains = selectedFarm.rains.filter(r => r.id !== rainId);
-      await updateDoc(doc(db, 'farms', selectedFarmId), { rains: updatedRains });
-    } catch (error) {
-      handleError(error, OperationType.UPDATE, `farms/${selectedFarmId}`);
-    }
+    if (!selectedFarm || !selectedFarmId) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Eliminar Registro de Lluvia',
+      message: '¿Estás seguro de eliminar este registro?',
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const updatedRains = selectedFarm.rains.filter(r => r.id !== rainId);
+          await updateDoc(doc(db, 'farms', selectedFarmId), { rains: updatedRains });
+        } catch (error) {
+           handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
+        } finally {
+           setIsActionLoading(false);
+           setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   // --- EXPENSE ACTIONS ---
@@ -430,6 +494,7 @@ export default function AgroApp() {
     e.preventDefault();
     if (!selectedFarmId || !expenseForm.date || !expenseForm.description || !expenseForm.amount || !selectedFarm) return;
     
+    setIsActionLoading(true);
     try {
       let updatedExpenses;
       if (editingExpenseId) {
@@ -438,7 +503,8 @@ export default function AgroApp() {
           date: expenseForm.date,
           category: expenseForm.category,
           description: expenseForm.description,
-          amount: Number(expenseForm.amount)
+          amount: Number(expenseForm.amount),
+          machineId: expenseForm.category === 'Maquinaria' ? expenseForm.machineId : ''
         } : exp);
       } else {
         updatedExpenses = [...selectedFarm.expenses, { 
@@ -446,16 +512,19 @@ export default function AgroApp() {
           date: expenseForm.date, 
           category: expenseForm.category,
           description: expenseForm.description,
-          amount: Number(expenseForm.amount) 
+          amount: Number(expenseForm.amount),
+          machineId: expenseForm.category === 'Maquinaria' ? expenseForm.machineId : ''
         }];
       }
       updatedExpenses.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
       await updateDoc(doc(db, 'farms', selectedFarmId), { expenses: updatedExpenses });
-      setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '' });
+      setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '', machineId: '' });
       setEditingExpenseId(null);
     } catch (error) {
-      handleError(error, OperationType.UPDATE, `farms/${selectedFarmId}`);
+       handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
+    } finally {
+       setIsActionLoading(false);
     }
   };
 
@@ -464,7 +533,8 @@ export default function AgroApp() {
       date: expense.date,
       category: expense.category,
       description: expense.description,
-      amount: expense.amount.toString()
+      amount: expense.amount.toString(),
+      machineId: expense.machineId || ''
     });
     setEditingExpenseId(expense.id);
   };
@@ -475,39 +545,52 @@ export default function AgroApp() {
   };
 
   const deleteExpense = async (expenseId: string) => {
-    if (!selectedFarm) return;
-    try {
-      const updatedExpenses = selectedFarm.expenses.filter(e => e.id !== expenseId);
-      await updateDoc(doc(db, 'farms', selectedFarmId), { expenses: updatedExpenses });
-      if (editingExpenseId === expenseId) cancelEditExpense();
-    } catch (error) {
-      handleError(error, OperationType.UPDATE, `farms/${selectedFarmId}`);
-    }
+    if (!selectedFarm || !selectedFarmId) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Eliminar Gasto',
+      message: '¿Estás seguro de eliminar este registro de gasto?',
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const updatedExpenses = selectedFarm.expenses.filter(e => e.id !== expenseId);
+          await updateDoc(doc(db, 'farms', selectedFarmId), { expenses: updatedExpenses });
+          if (editingExpenseId === expenseId) cancelEditExpense();
+        } catch (error) {
+           handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
+        } finally {
+           setIsActionLoading(false);
+           setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   // --- FILTERING & ANALYSIS ---
 
   const filteredExpenses = useMemo(() => {
-    if (!selectedFarm) return [];
+    if (!selectedFarm || !selectedFarm.expenses) return [];
     return selectedFarm.expenses.filter(exp => {
+      const expDate = exp.date || '';
       const matchCategory = expenseFilters.category === 'Todos' || exp.category === expenseFilters.category;
-      const matchStart = !expenseFilters.startDate || exp.date >= expenseFilters.startDate;
-      const matchEnd = !expenseFilters.endDate || exp.date <= expenseFilters.endDate;
+      const matchStart = !expenseFilters.startDate || expDate >= expenseFilters.startDate;
+      const matchEnd = !expenseFilters.endDate || expDate <= expenseFilters.endDate;
       return matchCategory && matchStart && matchEnd;
     });
   }, [selectedFarm, expenseFilters]);
 
   const filteredRains = useMemo(() => {
-    if (!selectedFarm) return [];
+    if (!selectedFarm || !selectedFarm.rains) return [];
     return selectedFarm.rains.filter(rain => {
-      const matchStart = !rainFilters.startDate || rain.date >= rainFilters.startDate;
-      const matchEnd = !rainFilters.endDate || rain.date <= rainFilters.endDate;
+      const rainDate = rain.date || '';
+      const matchStart = !rainFilters.startDate || rainDate >= rainFilters.startDate;
+      const matchEnd = !rainFilters.endDate || rainDate <= rainFilters.endDate;
       return matchStart && matchEnd;
     });
   }, [selectedFarm, rainFilters]);
 
   const totalRain = filteredRains.reduce((sum, r) => sum + r.mm, 0);
-  const maxRain = filteredRains.length ? Math.max(...filteredRains.map(r => r.mm)) : 0;
+  const maxRain = (filteredRains || []).length ? Math.max(...(filteredRains || []).map(r => r.mm)) : 0;
 
   // --- RENDER ---
 
@@ -608,12 +691,37 @@ export default function AgroApp() {
 
   return (
     <div className="min-h-screen bg-stone-100 text-stone-900 font-sans">
-      {globalError && (
-        <div className="fixed top-4 right-4 z-[1000] bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded shadow-lg">
-          <p>{globalError}</p>
-          <button onClick={() => setGlobalError('')} className="absolute top-0 right-0 p-1">×</button>
-        </div>
-      )}
+      <AnimatePresence>
+        {globalError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-2xl"
+          >
+            <div className="bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-4 border-white flex items-start gap-4">
+              <div className="bg-white/20 p-2 rounded-xl">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-black text-sm uppercase tracking-widest mb-1">Error del Sistema</h4>
+                <div className="text-sm font-medium opacity-90 leading-tight">
+                  {globalError.includes('{') ? JSON.parse(globalError).error : globalError}
+                </div>
+                {globalError.includes('{') && (
+                  <p className="text-[10px] mt-2 font-mono opacity-50">
+                    ID: {JSON.parse(globalError).authInfo.userId} • OP: {JSON.parse(globalError).operationType}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setGlobalError('')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Custom Confirm Modal */}
       {confirmDialog.isOpen && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -890,7 +998,7 @@ export default function AgroApp() {
                       <div 
                         key={farm.id} 
                         className="bg-white border border-stone-200 rounded-3xl p-6 hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-900/5 transition-all group cursor-pointer relative overflow-hidden active:scale-[0.98]" 
-                        onClick={() => { setSelectedFarmId(farm.id); setActiveTab('info'); }}
+                        onClick={() => { setSelectedFarmId(farm.id); setActiveTab('dashboard'); }}
                       >
                         <div className="absolute top-0 right-0 p-12 bg-emerald-50 rounded-full translate-x-1/2 -translate-y-1/2 group-hover:bg-emerald-100 transition-colors" />
                         <div className="relative z-10">
@@ -938,10 +1046,12 @@ export default function AgroApp() {
                 
                 <nav className="flex md:flex-col gap-1.5 overflow-x-auto md:overflow-y-visible pb-2 md:pb-0 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
                   {[
+                    { id: 'dashboard', icon: Home, label: 'Tablero' },
                     { id: 'info', icon: Info, label: 'Información' },
                     { id: 'ganaderia', icon: LayoutGrid, label: 'Ganadería' },
+                    { id: 'mapas', icon: Map, label: 'Lotes y Mapa' },
                     { id: 'agricultura', icon: Sprout, label: 'Agricultura' },
-                    { id: 'maquinarias', icon: AppLogo, label: 'Maquinarias' },
+                    { id: 'maquinarias', icon: Truck, label: 'Maquinarias' },
                     { id: 'lluvias', icon: CloudRain, label: 'Lluvias' },
                     { id: 'gastos', icon: Wallet, label: 'Gastos' },
                     { id: 'ingresos', icon: Receipt, label: 'Ingresos' },
@@ -972,6 +1082,14 @@ export default function AgroApp() {
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
                   >
+                
+                {activeTab === 'dashboard' && selectedFarm && (
+                  <DashboardModule 
+                    farmId={selectedFarm.id} 
+                    farmRains={selectedFarm.rains || []} 
+                    farmExpenses={selectedFarm.expenses || []} 
+                  />
+                )}
                 
                 {activeTab === 'info' && (
                   <div>
@@ -1033,15 +1151,25 @@ export default function AgroApp() {
                           <p className="font-medium text-stone-900">{selectedFarm.manager || '-'}</p>
                         </div>
                         <div className="sm:col-span-2">
-                          <p className="text-sm text-stone-500 mb-1">Coordenadas GPS</p>
-                          {selectedFarm.coordinates ? (
-                            <div className="space-y-3">
-                              <p className="font-mono text-sm bg-stone-100 p-2 rounded inline-block">{selectedFarm.coordinates}</p>
-                              <LocationPicker coordinates={selectedFarm.coordinates} readOnly={true} />
-                            </div>
-                          ) : (
-                            <p className="font-mono text-sm bg-stone-100 p-2 rounded inline-block text-stone-400">No especificadas</p>
-                          )}
+                          <p className="text-sm text-stone-500 mb-2">Ubicación Geográfica</p>
+                          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200">
+                             <div className="flex items-center gap-2 text-stone-600 font-mono text-sm mb-4">
+                               <MapPin className="w-4 h-4 text-emerald-600" />
+                               {selectedFarm.coordinates || 'Coordenadas no definidas'}
+                             </div>
+                             {selectedFarm.coordinates && (
+                               <div className="rounded-xl overflow-hidden shadow-sm border border-stone-200">
+                                 <iframe 
+                                   width="100%" 
+                                   height="250" 
+                                   style={{ border: 0 }} 
+                                   loading="lazy" 
+                                   allowFullScreen 
+                                   src={`https://www.google.com/maps/embed/v1/view?key=${(import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY}&center=${selectedFarm.coordinates.replace(/\s/g, '')}&zoom=14&maptype=satellite`}
+                                 />
+                               </div>
+                             )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1058,15 +1186,16 @@ export default function AgroApp() {
                   </div>
                 )}
 
-                {(activeTab === 'agricultura' || activeTab === 'maquinarias') && (
-                  <div className="flex flex-col items-center justify-center h-full text-center py-20">
-                    {activeTab === 'agricultura' && <Sprout className="w-20 h-20 text-stone-300 mb-6 drop-shadow-sm" />}
-                    {activeTab === 'maquinarias' && <AppLogo className="w-20 h-20 mb-6 opacity-30 grayscale" />}
-                    <h3 className="text-xl font-medium text-stone-700 mb-2">Módulo en Desarrollo</h3>
-                    <p className="text-stone-500 max-w-md">
-                      Esta sección estará disponible en la próxima actualización. Aquí podrás gestionar todo lo relacionado a la {activeTab}.
-                    </p>
-                  </div>
+                {activeTab === 'mapas' && selectedFarm && (
+                  <MapasModule farmId={selectedFarm.id} coordinates={selectedFarm.coordinates} />
+                )}
+
+                {activeTab === 'agricultura' && selectedFarm && (
+                  <AgriculturaModule farmId={selectedFarm.id} />
+                )}
+
+                {activeTab === 'maquinarias' && selectedFarm && (
+                  <MaquinariaModule farmId={selectedFarm.id} />
                 )}
 
                 {activeTab === 'lluvias' && (
@@ -1089,7 +1218,9 @@ export default function AgroApp() {
                               <label className="block text-sm text-stone-600 mb-1">Milímetros (mm)</label>
                               <input type="number" step="0.1" min="0" required value={rainForm.mm} onChange={e => setRainForm({...rainForm, mm: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="Ej: 15.5" />
                             </div>
-                            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-medium">Registrar Lluvia</button>
+                            <button type="submit" disabled={isActionLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-medium disabled:opacity-50">
+                                {isActionLoading ? 'Guardando...' : 'Registrar Lluvia'}
+                            </button>
                           </div>
                         </form>
                       </div>
@@ -1210,9 +1341,28 @@ export default function AgroApp() {
                                 <option value="Gastos generales">Gastos generales</option>
                                 <option value="Ganaderos">Ganaderos</option>
                                 <option value="Agrícolas">Agrícolas</option>
-                                <option value="Maquinarias">Maquinarias</option>
+                                <option value="Maquinaria">Maquinaria</option>
                               </select>
                             </div>
+                            {expenseForm.category === 'Maquinaria' && (
+                              <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                                <label className="block text-sm text-stone-600 mb-1">Afectado a Maquinaria</label>
+                                <select 
+                                  required
+                                  value={expenseForm.machineId} 
+                                  onChange={e => setExpenseForm({...expenseForm, machineId: e.target.value})} 
+                                  className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-emerald-50/50 font-medium"
+                                >
+                                  <option value="">Seleccionar máquina...</option>
+                                  {machines.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name} ({m.brand})</option>
+                                  ))}
+                                </select>
+                                {machines.length === 0 && (
+                                  <p className="text-[10px] text-red-500 mt-1 italic">No hay maquinarias registradas en este campo.</p>
+                                )}
+                              </div>
+                            )}
                             <div>
                               <label className="block text-sm text-stone-600 mb-1">Descripción breve</label>
                               <input type="text" required value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white" placeholder="Ej: Compra de gasoil" />
@@ -1221,8 +1371,8 @@ export default function AgroApp() {
                               <label className="block text-sm text-stone-600 mb-1">Monto ($)</label>
                               <input type="number" step="0.01" min="0" required value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white" placeholder="Ej: 150000" />
                             </div>
-                            <button type="submit" className={`w-full py-2 rounded transition-colors font-medium text-white ${editingExpenseId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-stone-800 hover:bg-stone-900'}`}>
-                              {editingExpenseId ? 'Actualizar Gasto' : 'Registrar Gasto'}
+                            <button type="submit" disabled={isActionLoading} className={`w-full py-2 rounded transition-colors font-medium text-white disabled:opacity-50 ${editingExpenseId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-stone-800 hover:bg-stone-900'}`}>
+                               {isActionLoading ? 'Guardando...' : (editingExpenseId ? 'Actualizar Gasto' : 'Registrar Gasto')}
                             </button>
                           </div>
                         </form>
@@ -1245,6 +1395,7 @@ export default function AgroApp() {
                               <option value="Gastos generales">Gastos generales</option>
                               <option value="Ganaderos">Ganaderos</option>
                               <option value="Agrícolas">Agrícolas</option>
+                              <option value="Maquinaria">Maquinaria</option>
                             </select>
                           </div>
                           <div>
@@ -1295,7 +1446,15 @@ export default function AgroApp() {
                                       </span>
                                     </td>
                                     <td className="py-3 px-4 font-medium text-stone-800">
-                                      {expense.description}
+                                      <div className="flex flex-col">
+                                        <span>{expense.description}</span>
+                                        {expense.machineId && (
+                                          <span className="text-[10px] text-emerald-600 flex items-center gap-1 font-bold">
+                                            <Wrench className="w-3 h-3" />
+                                            {machines.find(m => m.id === expense.machineId)?.name || 'Máquina no encontrada'}
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
                                     <td className="py-3 px-4 text-right text-amber-700 font-semibold whitespace-nowrap">
                                       $ {expense.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}

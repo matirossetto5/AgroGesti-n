@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Plus, Edit2, Trash2, Receipt, DollarSign, X } from 'lucide-react';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { handleFirestoreError } from '../lib/errorHandlers';
+import { Plus, Edit2, Trash2, Receipt, DollarSign, X, Search, Tag } from 'lucide-react';
+
+interface Animal {
+  id: string;
+  tagNumber: string;
+  category: string;
+}
 
 interface IncomeRecord {
   id: string;
@@ -9,6 +16,7 @@ interface IncomeRecord {
   category: string;
   description: string;
   amount: number;
+  soldAnimalIds?: string[];
 }
 
 interface IngresosModuleProps {
@@ -19,9 +27,17 @@ const CATEGORIES = ['Venta de ganado', 'Venta de granos', 'Servicios', 'Otro'];
 
 export default function IngresosModule({ farmId }: IngresosModuleProps) {
   const [incomes, setIncomes] = useState<IncomeRecord[]>([]);
+  const [animals, setAnimals] = useState<Animal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], category: CATEGORIES[0], description: '', amount: '' });
+  const [formData, setFormData] = useState({ 
+    date: new Date().toISOString().split('T')[0], 
+    category: CATEGORIES[0], 
+    description: '', 
+    amount: '',
+    selectedAnimals: [] as string[]
+  });
+  const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
@@ -40,33 +56,69 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
     return () => unsubscribe();
   }, [farmId]);
 
+  useEffect(() => {
+    const q = query(collection(db, 'farms', farmId, 'animals'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loaded: Animal[] = [];
+      snapshot.forEach((doc) => {
+        loaded.push({ id: doc.id, ...doc.data() } as Animal);
+      });
+      setAnimals(loaded);
+    });
+    return () => unsubscribe();
+  }, [farmId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const incomeData = {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    const selectedList = formData.selectedAnimals || [];
+    
+    const incomeData: Omit<IncomeRecord, 'id'> = {
       date: formData.date,
       category: formData.category,
       description: formData.description,
-      amount: parseFloat(formData.amount)
+      amount: parseFloat(formData.amount) || 0,
+      soldAnimalIds: formData.category === 'Venta de ganado' ? selectedList : []
     };
 
-    if (editingId) {
-      await updateDoc(doc(db, 'farms', farmId, 'incomes', editingId), incomeData);
-    } else {
-      await addDoc(collection(db, 'farms', farmId, 'incomes'), incomeData);
+    try {
+      if (editingId) {
+        await updateDoc(doc(db, 'farms', farmId, 'incomes', editingId), incomeData);
+      } else {
+        await addDoc(collection(db, 'farms', farmId, 'incomes'), incomeData);
+        
+        // If it's a new sale, delete the animals
+        if (formData.category === 'Venta de ganado' && selectedList.length > 0) {
+          const batch = writeBatch(db);
+          selectedList.forEach(animalId => {
+            batch.delete(doc(db, 'farms', farmId, 'animals', animalId));
+          });
+          await batch.commit();
+        }
+      }
+      setIsModalOpen(false);
+      setFormData({ date: new Date().toISOString().split('T')[0], category: CATEGORIES[0], description: '', amount: '', selectedAnimals: [] });
+      setEditingId(null);
+    } catch (error) {
+       handleFirestoreError(error, editingId ? 'update' : 'create', `farms/${farmId}/incomes`, auth);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
-    setFormData({ date: '', category: CATEGORIES[0], description: '', amount: '' });
-    setEditingId(null);
   };
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
+    setIsSubmitting(true);
     try {
       await deleteDoc(doc(db, 'farms', farmId, 'incomes', itemToDelete));
       setItemToDelete(null);
     } catch (error) {
-      console.error("Error deleting income:", error);
+      handleFirestoreError(error, 'delete', `farms/${farmId}/incomes/${itemToDelete}`, auth);
       setItemToDelete(null);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -78,7 +130,17 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
           <p className="text-stone-500 text-sm">Control de ventas y otros ingresos del campo</p>
         </div>
         <button 
-          onClick={() => { setEditingId(null); setFormData({ date: new Date().toISOString().split('T')[0], category: CATEGORIES[0], description: '', amount: '' }); setIsModalOpen(true); }}
+          onClick={() => { 
+            setEditingId(null); 
+            setFormData({ 
+              date: new Date().toISOString().split('T')[0], 
+              category: CATEGORIES[0], 
+              description: '', 
+              amount: '',
+              selectedAnimals: []
+            }); 
+            setIsModalOpen(true); 
+          }}
           className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-2.5 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 active:scale-95"
         >
           <Plus className="w-5 h-5" /> Nuevo Ingreso
@@ -127,7 +189,17 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-1">
                         <button 
-                          onClick={() => { setEditingId(income.id); setFormData({ date: income.date, category: income.category, description: income.description, amount: income.amount.toString() }); setIsModalOpen(true); }} 
+                          onClick={() => { 
+                            setEditingId(income.id); 
+                            setFormData({ 
+                              date: income.date, 
+                              category: income.category, 
+                              description: income.description, 
+                              amount: income.amount.toString(),
+                              selectedAnimals: income.soldAnimalIds || []
+                            }); 
+                            setIsModalOpen(true); 
+                          }} 
                           className="p-2 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
                           title="Editar"
                         >
@@ -186,7 +258,7 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <form onSubmit={handleSubmit} className="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
+          <form onSubmit={handleSubmit} className="bg-white p-8 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-stone-900">{editingId ? 'Editar' : 'Nuevo'} Ingreso</h3>
               <button 
@@ -198,63 +270,113 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
               </button>
             </div>
             
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-stone-700 mb-1">Fecha</label>
-                <input 
-                  type="date" 
-                  value={formData.date} 
-                  onChange={e => setFormData({...formData, date: e.target.value})} 
-                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
-                  required 
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-bold text-stone-700 mb-1">Categoría</label>
-                <select 
-                  value={formData.category} 
-                  onChange={e => setFormData({...formData, category: e.target.value})} 
-                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                >
-                  {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-stone-700 mb-1">Descripción</label>
-                <input 
-                  type="text" 
-                  placeholder="Ej: Venta de trigo" 
-                  value={formData.description} 
-                  onChange={e => setFormData({...formData, description: e.target.value})} 
-                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
-                  required 
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-stone-700 mb-1">Monto ($)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 font-bold">$</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-1">Fecha</label>
                   <input 
-                    type="number" 
-                    step="0.01"
-                    placeholder="0.00" 
-                    value={formData.amount} 
-                    onChange={e => setFormData({...formData, amount: e.target.value})} 
-                    className="w-full pl-8 pr-4 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all font-bold text-emerald-700" 
+                    type="date" 
+                    value={formData.date} 
+                    onChange={e => setFormData({...formData, date: e.target.value})} 
+                    className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
                     required 
                   />
                 </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-1">Categoría</label>
+                  <select 
+                    value={formData.category} 
+                    onChange={e => setFormData({...formData, category: e.target.value, selectedAnimals: []})} 
+                    className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  >
+                    {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-1">Descripción</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ej: Venta de lotes vacas" 
+                    value={formData.description} 
+                    onChange={e => setFormData({...formData, description: e.target.value})} 
+                    className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
+                    required 
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-1">Monto ($)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 font-bold">$</span>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      placeholder="0.00" 
+                      value={formData.amount} 
+                      onChange={e => setFormData({...formData, amount: e.target.value})} 
+                      className="w-full pl-8 pr-4 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all font-bold text-emerald-700" 
+                      required 
+                    />
+                  </div>
+                </div>
               </div>
+
+              {formData.category === 'Venta de ganado' && (
+                <div className="space-y-4">
+                  <label className="block text-sm font-bold text-stone-700">Seleccionar Animales Vendidos</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por caravana..." 
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="border border-stone-200 rounded-2xl max-h-[300px] overflow-y-auto divide-y divide-stone-100 p-2 bg-stone-50">
+                    {animals
+                      .filter(a => (a.tagNumber || '').includes(searchTerm))
+                      .map(animal => (
+                        <label key={animal.id} className="flex items-center gap-3 p-3 hover:bg-white rounded-xl cursor-pointer transition-colors group">
+                          <input 
+                            type="checkbox" 
+                            checked={(formData.selectedAnimals || []).includes(animal.id)}
+                            onChange={e => {
+                              const selectedList = formData.selectedAnimals || [];
+                              const newSelected = e.target.checked 
+                                ? [...selectedList, animal.id]
+                                : selectedList.filter(id => id !== animal.id);
+                              setFormData({...formData, selectedAnimals: newSelected});
+                            }}
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-stone-300"
+                          />
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-stone-800">Carcasa #{animal.tagNumber}</p>
+                            <p className="text-[10px] text-stone-500 font-bold uppercase">{animal.category}</p>
+                          </div>
+                          {formData.selectedAnimals?.includes(animal.id) && (
+                            <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">SELECCIONADO</span>
+                          )}
+                        </label>
+                      ))}
+                    {animals.length === 0 && <p className="p-4 text-center text-stone-400 text-sm italic">No hay animales en stock</p>}
+                  </div>
+                  <p className="text-xs text-stone-500 bg-stone-100 p-3 rounded-xl border border-stone-200">
+                    <b>{(formData.selectedAnimals || []).length}</b> animales seleccionados. Se eliminarán del inventario al guardar.
+                  </p>
+                </div>
+              )}
             </div>
 
             <button 
               type="submit" 
-              className="w-full mt-8 bg-emerald-600 text-white font-bold py-3 rounded-2xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95"
+              disabled={isSubmitting}
+              className="w-full mt-8 bg-emerald-600 text-white font-black py-4 rounded-2xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95 uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Guardar Ingreso
+              {isSubmitting ? 'Guardando...' : (editingId ? 'Actualizar Ingreso' : 'Confirmar Venta e Ingreso')}
             </button>
           </form>
         </div>
