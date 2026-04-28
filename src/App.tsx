@@ -3,7 +3,7 @@ import {
   MapPin, User, Building2, Plus, Trash2, 
   ArrowLeft, Sprout, CloudRain, Wallet, Info, LayoutGrid,
   Droplets, Receipt, Edit, Filter, X, LogOut, Mail, Lock, AlertCircle, Camera, Save, Wrench,
-  Menu, ChevronRight, Home, Map, Truck
+  Menu, ChevronRight, Home, Map, Truck, Wheat
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LocationPicker from './components/LocationPicker';
@@ -54,11 +54,8 @@ const googleProvider = new GoogleAuthProvider();
 
 // --- LOGO COMPONENT ---
 const AppLogo = ({ className = "w-8 h-8" }: { className?: string }) => (
-  <div className={`bg-black rounded-xl flex items-center justify-center overflow-hidden shrink-0 ${className}`}>
-    <svg viewBox="0 0 40 40" className="w-3/5 h-3/5 text-white" fill="currentColor">
-      <path d="M10 15 L20 10 L30 15 L30 25 L20 30 L10 25 Z" fill="none" stroke="currentColor" strokeWidth="3" />
-      <path d="M20 15 L15 20 L20 25 L25 20 Z" />
-    </svg>
+  <div className={`bg-emerald-600 rounded-xl flex items-center justify-center overflow-hidden shrink-0 shadow-inner ${className}`}>
+    <Wheat className="w-3/5 h-3/5 text-white" />
   </div>
 );
 

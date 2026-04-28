@@ -56,7 +56,7 @@ function GeomanHandler({
   }, [map, isEditActive]);
 
   useEffect(() => {
-    map.pm.addControls({
+    const controlsConfig = {
       position: 'topleft',
       drawMarker: false,
       drawCircle: false,
@@ -69,35 +69,43 @@ function GeomanHandler({
       dragMode: false,
       editMode: true,
       removalMode: false,
-    });
+    };
 
-    map.on('pm:create', (e: any) => {
+    map.pm.addControls(controlsConfig as any);
+
+    const handleCreate = (e: any) => {
       const { layer } = e;
       if (layer instanceof L.Polygon) {
-        const latlngs = layer.getLatLngs()[0] as L.LatLng[];
-        const path = latlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }));
-        const area = calculateAreaHa(path);
-        onPolygonComplete(path, area);
+        const latlngs = layer.getLatLngs()[0];
+        if (Array.isArray(latlngs)) {
+          const path = (latlngs as L.LatLng[]).map(ll => ({ lat: ll.lat, lng: ll.lng }));
+          const area = calculateAreaHa(path);
+          onPolygonComplete(path, area);
+        }
         map.removeLayer(layer);
       }
-    });
+    };
 
-    // Handle updates to existing polygons
-    map.on('pm:edit', (e: any) => {
+    const handleEdit = (e: any) => {
       const { layer } = e;
       const layerId = (layer.options as any).id;
       if (layer instanceof L.Polygon && layerId) {
-        const latlngs = layer.getLatLngs()[0] as L.LatLng[];
-        const path = latlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }));
-        const area = calculateAreaHa(path);
-        onPolygonEdit?.(layerId, path, area);
+        const latlngs = layer.getLatLngs()[0];
+        if (Array.isArray(latlngs)) {
+          const path = (latlngs as L.LatLng[]).map(ll => ({ lat: ll.lat, lng: ll.lng }));
+          const area = calculateAreaHa(path);
+          onPolygonEdit?.(layerId, path, area);
+        }
       }
-    });
+    };
+
+    map.on('pm:create', handleCreate);
+    map.on('pm:edit', handleEdit);
 
     return () => {
       map.pm.removeControls();
-      map.off('pm:create');
-      map.off('pm:edit');
+      map.off('pm:create', handleCreate);
+      map.off('pm:edit', handleEdit);
     };
   }, [map, onPolygonComplete, onPolygonEdit]);
 
@@ -109,8 +117,10 @@ function MapAutoCenter({ center, lots }: { center: [number, number], lots: Lot[]
   const map = useMap();
   useEffect(() => {
     if (lots.length > 0) {
-      const group = new L.FeatureGroup(lots.map(lot => L.polygon(lot.path as any)));
-      map.fitBounds(group.getBounds(), { padding: [50, 50] });
+      const bounds = L.latLngBounds(lots.flatMap(lot => lot.path.map(p => [p.lat, p.lng] as [number, number])));
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+      }
     } else {
       map.setView(center, 14);
     }
