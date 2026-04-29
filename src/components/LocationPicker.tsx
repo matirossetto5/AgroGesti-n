@@ -120,10 +120,12 @@ export default function LocationPicker({ coordinates, onChange, readOnly = false
         scrollWheelZoom={true} 
         style={{ height: '100%', width: '100%', zIndex: 0 }}
       >
-        {/* Hybrid Google Maps Layer (Satellite + Roads/Labels) */}
+        {/* OpenStreetMap + CartoDB Layer (Detailed Maps) */}
         <TileLayer
-          attribution='&copy; Google Maps'
-          url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+          attribution='&copy; OpenStreetMap contributors, &copy; CartoDB'
+          url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
+          maxZoom={20}
+          subdomains={['a', 'b', 'c', 'd']}
         />
         <LocationMarker position={tempPosition || position} setPosition={handleMapClick} readOnly={readOnly} />
         <MapUpdater position={tempPosition || position} />

@@ -270,8 +270,10 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
             className="rounded-[2.4rem] z-0"
           >
             <TileLayer
-              attribution='&copy; Google Maps'
-              url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+              attribution='&copy; OpenStreetMap contributors, &copy; CartoDB'
+              url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
+              maxZoom={20}
+              subdomains={['a', 'b', 'c', 'd']}
             />
             <GeomanHandler 
               onPolygonComplete={onPolygonComplete} 

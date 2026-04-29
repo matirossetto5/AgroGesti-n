@@ -4,41 +4,38 @@
 
 - Cuenta en [Vercel](https://vercel.com)
 - Cuenta en [Firebase](https://firebase.google.com)
-- Cuenta en [Google Cloud Console](https://console.cloud.google.com)
 - Cuenta en [Sentry](https://sentry.io) (opcional pero recomendado)
+
+**Nota:** AgroGestión ya no depende de APIs de Google o Gemini. Los mapas utilizan OpenStreetMap/CartoDB (gratis) y el clima usa Open-Meteo API (gratis).
 
 ## Pasos de Despliegue
 
 ### 1. Preparar variables de entorno
 
-Primero, necesitas obtener las siguientes claves API:
+Solo necesitas configurar **Firebase**. Las demás APIs son completamente libres:
 
-#### Google Maps API Key
-1. Ve a [Google Cloud Console](https://console.cloud.google.com)
-2. Crea un nuevo proyecto
-3. Habilita las siguientes APIs:
-   - Maps JavaScript API
-   - Geocoding API
-4. Crea una credencial de tipo "API Key"
-5. Copia la clave
-
-#### Gemini API Key
-1. Ve a [Google AI Studio](https://aistudio.google.com)
-2. Haz clic en "Get API Key"
-3. Crea una nueva clave en Google Cloud
-4. Copia la clave
-
-#### Firebase Configuration
+#### Firebase Configuration (REQUERIDO)
 1. Ve a [Firebase Console](https://console.firebase.google.com)
 2. Crea un nuevo proyecto
 3. Ve a Configuración del proyecto
 4. En "Apps" agrega una aplicación web
-5. Copia los datos de configuración
+5. Copia los 5 datos de configuración:
+   - API Key
+   - Auth Domain
+   - Project ID
+   - Storage Bucket
+   - Messaging Sender ID
+   - App ID
 
 #### Sentry DSN (Opcional)
-1. Crea una cuenta en [Sentry](https://sentry.io)
+1. Ve a [Sentry](https://sentry.io) (opcional para monitoreo de errores)
 2. Crea un nuevo proyecto
 3. Copia el DSN para React
+
+#### APIs Libres (Sin Configuración)
+✅ **Mapas**: OpenStreetMap + CartoDB (gratis, sin API key)  
+✅ **Clima**: Open-Meteo API (gratis, sin API key)  
+✅ **Reportes**: LibreOffice/PDF (gratis, local)
 
 ### 2. Conectar Vercel con GitHub
 
@@ -52,19 +49,25 @@ Primero, necesitas obtener las siguientes claves API:
 
 ### 3. Configurar Variables de Entorno en Vercel
 
-En el panel de configuración del proyecto en Vercel, agrega las siguientes variables de entorno:
+En el panel de configuración del proyecto en Vercel, agrega SOLO las siguientes variables de entorno:
 
 ```
-VITE_GOOGLE_MAPS_API_KEY=<tu_google_maps_key>
-VITE_GEMINI_API_KEY=<tu_gemini_key>
-VITE_SENTRY_DSN=<tu_sentry_dsn>
+# Firebase (requerido)
 VITE_FIREBASE_API_KEY=<tu_firebase_api_key>
 VITE_FIREBASE_AUTH_DOMAIN=<tu_firebase_auth_domain>
 VITE_FIREBASE_PROJECT_ID=<tu_firebase_project_id>
 VITE_FIREBASE_STORAGE_BUCKET=<tu_firebase_storage_bucket>
 VITE_FIREBASE_MESSAGING_SENDER_ID=<tu_firebase_messaging_sender_id>
 VITE_FIREBASE_APP_ID=<tu_firebase_app_id>
+
+# Sentry (opcional, para monitoreo de errores)
+VITE_SENTRY_DSN=<tu_sentry_dsn>
 ```
+
+**NO NECESITAS:**
+- ❌ Google Maps API Key
+- ❌ Gemini API Key
+- ❌ Google Cloud Console
 
 ### 4. Configurar Firebase para Vercel
 
@@ -131,14 +134,22 @@ Después del despliegue:
 ### Error: "Firebase initialization failed"
 - Verifica que todas las variables de Firebase estén correctamente configuradas
 - Asegúrate de que el dominio de Vercel esté autorizado en Firebase
+- Confirma que Firestore Database está habilitada en tu proyecto Firebase
 
-### Error: "Maps failed to load"
-- Verifica que la Google Maps API Key esté activa
-- Asegúrate de que Maps JavaScript API está habilitada en Google Cloud
+### Error: "Mapas no cargan correctamente"
+- Los mapas usan OpenStreetMap/CartoDB (sin API key)
+- Esto es un problema local; verifica tu conexión internet
+- Los mapas deberían cargar automáticamente sin configuración adicional
 
-### Error: "CORS error"
-- Las APIs están configuradas para funcionar desde cualquier dominio
-- Si hay problemas, verifica la configuración de CORS en Firebase
+### Error: "El clima no se muestra"
+- El clima usa Open-Meteo API (completamente gratis, sin API key)
+- Si no muestra, verifica que tu dominio de Vercel pueda hacer requests HTTP
+- Los datos de clima se actualizan cada 30 minutos
+
+### Error: "Autenticación con Google no funciona"
+- Verifica que hayas habilitado "Google" en Firebase Authentication
+- Asegúrate de que el dominio de Vercel esté en "Authorized domains"
+- Si es localhost, Firebase debe permitir aplicaciones locales en authentication settings
 
 ## Actualizaciones Futuras
 
@@ -151,9 +162,11 @@ Para actualizar la aplicación en producción:
 
 ## Monitoreo
 
-- **Sentry**: Recibe alertas de errores en tiempo real
+- **Sentry** (opcional): Recibe alertas de errores en tiempo real
 - **Vercel Analytics**: Monitorea rendimiento y uptime
-- **Google Cloud**: Monitorea uso de APIs
+- **Firebase Console**: Monitorea uso de Firestore y autenticación
+- **OpenStreetMap**: Sin límites de uso
+- **Open-Meteo**: Sin límites de uso
 
 ## Soporte
 
