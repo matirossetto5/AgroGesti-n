@@ -1156,14 +1156,12 @@ export default function AgroApp() {
                              </div>
                              {selectedFarm.coordinates && (
                                <div className="rounded-xl overflow-hidden shadow-sm border border-stone-200">
-                                 <iframe 
-                                   width="100%" 
-                                   height="250" 
-                                   style={{ border: 0 }} 
-                                   loading="lazy" 
-                                   allowFullScreen 
-                                   src={`https://www.google.com/maps/embed/v1/view?key=${(import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY}&center=${selectedFarm.coordinates.replace(/\s/g, '')}&zoom=14&maptype=satellite`}
-                                 />
+                                 <div style={{ height: '250px', width: '100%', background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                   <div className="text-center">
+                                     <p className="text-stone-600 font-medium mb-2">Ubicación: {selectedFarm.coordinates}</p>
+                                     <p className="text-xs text-stone-500">Abre el módulo de "Lotes y Mapa" para ver el mapa interactivo</p>
+                                   </div>
+                                 </div>
                                </div>
                              )}
                           </div>
