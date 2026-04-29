@@ -1,17 +1,16 @@
 import * as Sentry from '@sentry/react';
 
 export function initializeSentry() {
-  if (import.meta.env.PROD) {
+  const isDev = import.meta.env.DEV;
+  const isProduction = !isDev;
+  const dsn = import.meta.env.VITE_SENTRY_DSN as string;
+  const mode = import.meta.env.MODE;
+
+  if (isProduction && dsn) {
     Sentry.init({
-      dsn: import.meta.env.VITE_SENTRY_DSN,
-      environment: import.meta.env.MODE,
+      dsn,
+      environment: mode,
       tracesSampleRate: 0.1,
-      integrations: [
-        new Sentry.Replay({
-          maskAllText: true,
-          blockAllMedia: true,
-        }),
-      ],
       replaysSessionSampleRate: 0.1,
       replaysOnErrorSampleRate: 1.0,
     });

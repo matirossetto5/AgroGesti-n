@@ -48,8 +48,8 @@ export const weatherService = {
         humidity: current.relative_humidity_2m,
         windSpeed: current.wind_speed_10m,
         feelsLike: current.apparent_temperature,
-        description: this.getWeatherDescription(current.weather_code),
-        icon: this.getWeatherIcon(current.weather_code)
+        description: this._getWeatherDescription(current.weather_code),
+        icon: this._getWeatherIcon(current.weather_code)
       };
     } catch (error) {
       console.error('Error fetching weather:', error);
@@ -83,7 +83,7 @@ export const weatherService = {
           tempMin,
           precipitation,
           windSpeed,
-          description: this.getWeatherDescription(weatherCode),
+          description: this._getWeatherDescription(weatherCode),
           riskOfFrost: tempMin <= 0,
           riskOfDrought: precipitation < 5 && tempMax > 25
         };
@@ -142,7 +142,7 @@ export const weatherService = {
     return alerts;
   },
 
-  private getWeatherDescription(code: number): string {
+  _getWeatherDescription(code: number): string {
     const descriptions: Record<number, string> = {
       0: 'Despejado',
       1: 'Parcialmente nublado',
@@ -172,7 +172,7 @@ export const weatherService = {
     return descriptions[code] || 'Desconocido';
   },
 
-  private getWeatherIcon(code: number): string {
+  _getWeatherIcon(code: number): string {
     if (code === 0) return '☀️';
     if (code <= 3) return '⛅';
     if (code === 45 || code === 48) return '🌫️';

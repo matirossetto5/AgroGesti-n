@@ -54,7 +54,11 @@ export const reportService = {
     yPos += 6;
     doc.text(`Gastos: $${data.totalExpenses.toLocaleString('es-AR')}`, 10, yPos);
     yPos += 6;
-    doc.setTextColor(data.balance >= 0 ? 16, 185, 129 : 239, 68, 68);
+    if (data.balance >= 0) {
+      doc.setTextColor(16, 185, 129);
+    } else {
+      doc.setTextColor(239, 68, 68);
+    }
     doc.text(`Balance: $${data.balance.toLocaleString('es-AR')}`, 10, yPos);
     doc.setTextColor(0, 0, 0);
     yPos += 12;
