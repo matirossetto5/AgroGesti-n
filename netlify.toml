@@ -1,11 +1,10 @@
 [build]
-command = "npm run build"
+command = "npm install --include=optional && npm run build"
 functions = "netlify/functions"
 publish = "dist"
 
 [build.environment]
 NODE_VERSION = "18"
-NPM_FLAGS = "--include=optional"
 
 [[redirects]]
 from = "/*"
