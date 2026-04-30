@@ -1,5 +1,5 @@
 [build]
-command = "npm install --include=optional && npm run build"
+command = "npm ci --include=optional && npm run build"
 functions = "netlify/functions"
 publish = "dist"
 
