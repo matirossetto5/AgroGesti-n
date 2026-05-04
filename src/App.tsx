@@ -18,7 +18,7 @@ import {
   signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider, User as FirebaseUser,
   createUserWithEmailAndPassword, signInWithEmailAndPassword
 } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError } from './lib/errorHandlers';
 
 // --- ERROR HANDLING ---
@@ -124,6 +124,7 @@ export default function AgroApp() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [selectedFarmId, setSelectedFarmId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('info');
+  const [activeUsers, setActiveUsers] = useState<{ uid: string; name: string; photo: string | null }[]>([]);
 
   // User Profile State
   const [userProfile, setUserProfile] = useState<UserProfile>({ firstName: '', lastName: '', profession: '', photoBase64: '' });
@@ -198,7 +199,7 @@ export default function AgroApp() {
       return;
     }
 
-    const q = query(collection(db, 'farms'), where('userId', '==', user.uid));
+    const q = collection(db, 'farms');
     const unsubscribeFarms = onSnapshot(q, (snapshot) => {
       const loadedFarms: Farm[] = [];
       snapshot.forEach((doc) => {
@@ -249,6 +250,44 @@ export default function AgroApp() {
 
     return () => unsubscribe();
   }, [selectedFarmId]);
+
+  // Presencia en tiempo real: registra al usuario activo y escucha a otros
+  useEffect(() => {
+    if (!selectedFarmId || !user) {
+      setActiveUsers([]);
+      return;
+    }
+
+    const presenceRef = doc(db, 'farms', selectedFarmId, 'presence', user.uid);
+    const displayName = userProfile.firstName
+      ? `${userProfile.firstName} ${userProfile.lastName}`.trim()
+      : user.displayName || user.email || 'Usuario';
+
+    setDoc(presenceRef, {
+      uid: user.uid,
+      name: displayName,
+      photo: userProfile.photoBase64 || user.photoURL || null,
+      lastSeen: serverTimestamp()
+    }).catch(() => {});
+
+    const presenceCol = collection(db, 'farms', selectedFarmId, 'presence');
+    const unsubscribePresence = onSnapshot(presenceCol, (snapshot) => {
+      const others: { uid: string; name: string; photo: string | null }[] = [];
+      snapshot.forEach((d) => {
+        if (d.id !== user.uid) others.push(d.data() as any);
+      });
+      setActiveUsers(others);
+    });
+
+    const handleUnload = () => { deleteDoc(presenceRef).catch(() => {}); };
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      deleteDoc(presenceRef).catch(() => {});
+      unsubscribePresence();
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [selectedFarmId, user, userProfile.firstName, userProfile.lastName, userProfile.photoBase64]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -751,13 +790,34 @@ export default function AgroApp() {
           </div>
           <div className="flex items-center gap-4">
             {selectedFarmId && (
-              <button 
-                onClick={() => { setSelectedFarmId(null); setIsEditingFarm(false); }}
-                className="flex items-center gap-2 text-emerald-100 hover:text-white transition-colors bg-emerald-900/50 px-4 py-2 rounded-lg"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Volver a Campos</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setSelectedFarmId(null); setIsEditingFarm(false); }}
+                  className="flex items-center gap-2 text-emerald-100 hover:text-white transition-colors bg-emerald-900/50 px-4 py-2 rounded-lg"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Volver a Campos</span>
+                </button>
+                {activeUsers.length > 0 && (
+                  <div className="flex items-center gap-1.5 bg-emerald-700/40 px-3 py-2 rounded-lg" title={`También conectados: ${activeUsers.map(u => u.name).join(', ')}`}>
+                    <span className="w-2 h-2 bg-emerald-300 rounded-full animate-pulse shrink-0" />
+                    <div className="flex -space-x-2">
+                      {activeUsers.slice(0, 3).map((u) => (
+                        <div key={u.uid} className="w-6 h-6 rounded-full border-2 border-emerald-800 overflow-hidden bg-emerald-200 flex items-center justify-center shrink-0" title={u.name}>
+                          {u.photo ? (
+                            <img src={u.photo} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-[9px] font-bold text-emerald-800">{u.name.charAt(0).toUpperCase()}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-xs text-emerald-200 font-medium hidden sm:inline">
+                      {activeUsers.length === 1 ? `${activeUsers[0].name.split(' ')[0]} también aquí` : `${activeUsers.length} más conectados`}
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
             <div className="flex items-center gap-2 sm:gap-4 border-l border-stone-200 pl-4">
               <button 
