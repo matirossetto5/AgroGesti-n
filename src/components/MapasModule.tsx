@@ -5,7 +5,7 @@ import '@geoman-io/leaflet-geoman-free';
 import { collection, onSnapshot, addDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError } from '../lib/errorHandlers';
-import { Layers, Trash2, Info, X, MapPin, Edit2, Check } from 'lucide-react';
+import { Layers, Trash2, Info, X, MapPin, Edit2, Check, Plus, PenLine } from 'lucide-react';
 
 interface Lot {
   id: string;
@@ -36,14 +36,18 @@ function calculateAreaHa(path: { lat: number, lng: number }[]): number {
   return area / 10000;
 }
 
-function GeomanHandler({ 
-  onPolygonComplete, 
+function GeomanHandler({
+  onPolygonComplete,
   onPolygonEdit,
-  isEditActive
-}: { 
+  isEditActive,
+  isDrawActive,
+  onDrawEnd,
+}: {
   onPolygonComplete: (path: { lat: number; lng: number }[], area: number) => void;
   onPolygonEdit?: (id: string, path: { lat: number; lng: number }[], area: number) => void;
   isEditActive?: boolean;
+  isDrawActive?: boolean;
+  onDrawEnd?: () => void;
 }) {
   const map = useMap();
 
@@ -56,23 +60,14 @@ function GeomanHandler({
   }, [map, isEditActive]);
 
   useEffect(() => {
-    const controlsConfig = {
-      position: 'topleft',
-      drawMarker: false,
-      drawCircle: false,
-      drawPolyline: false,
-      drawRectangle: false,
-      drawCircleMarker: false,
-      drawText: false,
-      cutPolygon: false,
-      rotateMode: false,
-      dragMode: false,
-      editMode: true,
-      removalMode: false,
-    };
+    if (isDrawActive) {
+      map.pm.enableDraw('Polygon', { snappable: true, snapDistance: 20, allowSelfIntersection: false } as any);
+    } else {
+      map.pm.disableDraw();
+    }
+  }, [map, isDrawActive]);
 
-    map.pm.addControls(controlsConfig as any);
-
+  useEffect(() => {
     const handleCreate = (e: any) => {
       const { layer } = e;
       if (layer instanceof L.Polygon) {
@@ -83,6 +78,7 @@ function GeomanHandler({
           onPolygonComplete(path, area);
         }
         map.removeLayer(layer);
+        onDrawEnd?.();
       }
     };
 
@@ -103,11 +99,10 @@ function GeomanHandler({
     map.on('pm:edit', handleEdit);
 
     return () => {
-      map.pm.removeControls();
       map.off('pm:create', handleCreate);
       map.off('pm:edit', handleEdit);
     };
-  }, [map, onPolygonComplete, onPolygonEdit]);
+  }, [map, onPolygonComplete, onPolygonEdit, onDrawEnd]);
 
   return null;
 }
@@ -144,6 +139,7 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
   const [isAddingLot, setIsAddingLot] = useState(false);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [isGeometryEditActive, setIsGeometryEditActive] = useState(false);
+  const [isDrawActive, setIsDrawActive] = useState(false);
   
   const [newLotPath, setNewLotPath] = useState<{ lat: number; lng: number }[] | null>(null);
   const [newLotArea, setNewLotArea] = useState<number>(0);
@@ -179,6 +175,7 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
     setNewLotPath(path);
     setNewLotArea(area);
     setIsAddingLot(true);
+    setIsDrawActive(false);
   };
 
   const saveLot = async () => {
@@ -262,12 +259,27 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
           <p className="text-stone-500 text-sm">Delimitación satelital y gestión de superficie</p>
         </div>
         {!isAddingLot && (
-          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-2xl border border-stone-200 shadow-sm">
-             <Info className="w-4 h-4 text-emerald-600" />
-             <span className="text-xs font-bold text-stone-600 uppercase tracking-widest">
-               Usa el panel de dibujo para crear lotes
-             </span>
-          </div>
+          isDrawActive ? (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-2xl">
+                <PenLine className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <span className="text-xs font-bold text-emerald-700">Hacé clic en el mapa para dibujar el lote</span>
+              </div>
+              <button
+                onClick={() => setIsDrawActive(false)}
+                className="flex items-center gap-2 bg-white border border-stone-200 px-4 py-2 rounded-2xl text-stone-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all text-sm font-bold shadow-sm"
+              >
+                <X className="w-4 h-4" /> Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsDrawActive(true)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded-2xl transition-all shadow-lg shadow-emerald-100 text-sm"
+            >
+              <Plus className="w-4 h-4" /> Dibujar nuevo lote
+            </button>
+          )
         )}
       </div>
 
@@ -295,6 +307,8 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
               onPolygonComplete={onPolygonComplete}
               onPolygonEdit={onPolygonEdit}
               isEditActive={isGeometryEditActive}
+              isDrawActive={isDrawActive}
+              onDrawEnd={() => setIsDrawActive(false)}
             />
             <MapAutoCenter center={defaultCenter} lots={lots} />
 
