@@ -1,6 +1,5 @@
 [build]
 command = "npm ci --include=optional && npm run build"
-functions = "netlify/functions"
 publish = "dist"
 
 [build.environment]
