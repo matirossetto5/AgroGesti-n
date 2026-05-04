@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { 
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell, AreaChart, Area, LineChart, Line
+  PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
-import { 
-  TrendingUp, TrendingDown, Wallet, Users, CloudRain, 
-  ArrowUpRight, ArrowDownRight, Activity, PieChart as PieChartIcon, 
-  BarChart3, Calendar
+import {
+  TrendingUp, Wallet, Users, CloudRain,
+  ArrowUpRight, ArrowDownRight, Activity, PieChart as PieChartIcon,
+  BarChart3, Calendar, Droplets
 } from 'lucide-react';
 
 interface DashboardModuleProps {
@@ -17,7 +17,22 @@ interface DashboardModuleProps {
   farmExpenses: any[];
 }
 
-const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+const PALETTE = ['#10b981', '#f59e0b', '#3b82f6', '#f43f5e', '#8b5cf6', '#06b6d4'];
+
+const formatCurrency = (value: number) => {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}k`;
+  return `$${value}`;
+};
+
+const tooltipStyle = {
+  borderRadius: '1rem',
+  border: 'none',
+  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+  padding: '10px 14px',
+  fontSize: '13px',
+  fontWeight: 600,
+};
 
 export default function DashboardModule({ farmId, farmRains, farmExpenses }: DashboardModuleProps) {
   const [incomes, setIncomes] = useState<any[]>([]);
@@ -28,101 +43,67 @@ export default function DashboardModule({ farmId, farmRains, farmExpenses }: Das
     if (!farmId) return;
     setIsLoading(true);
 
-    const incomesRef = collection(db, `farms/${farmId}/incomes`);
-    const unsubIncomes = onSnapshot(incomesRef, (snapshot) => {
-      setIncomes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubIncomes = onSnapshot(collection(db, `farms/${farmId}/incomes`), (snap) => {
+      setIncomes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const animalsRef = collection(db, `farms/${farmId}/animals`);
-    const unsubAnimals = onSnapshot(animalsRef, (snapshot) => {
-      setAnimals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubAnimals = onSnapshot(collection(db, `farms/${farmId}/animals`), (snap) => {
+      setAnimals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false);
     });
 
-    return () => {
-      unsubIncomes();
-      unsubAnimals();
-    };
+    return () => { unsubIncomes(); unsubAnimals(); };
   }, [farmId]);
 
-  // --- DATA PROCESSING ---
-
   const stats = useMemo(() => {
-    const totalIncomes = incomes.reduce((sum, inc) => sum + (inc.amount || 0), 0);
-    const totalExpenses = farmExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+    const totalIncomes = incomes.reduce((s, i) => s + (i.amount || 0), 0);
+    const totalExpenses = farmExpenses.reduce((s, e) => s + (e.amount || 0), 0);
     const balance = totalIncomes - totalExpenses;
-    
     const activeAnimals = animals.filter(a => a.status === 'Activo').length;
-    const totalRain = farmRains.reduce((sum, r) => sum + (r.mm || 0), 0);
-
+    const totalRain = farmRains.reduce((s, r) => s + (r.mm || 0), 0);
     return { totalIncomes, totalExpenses, balance, activeAnimals, totalRain };
   }, [incomes, farmExpenses, farmRains, animals]);
 
-  // Cash Flow Data (Monthly)
   const cashFlowData = useMemo(() => {
-    const months: Record<string, { month: string, ingresos: number, gastos: number }> = {};
-    const last6Months = [];
+    const months: Record<string, { month: string; Ingresos: number; Gastos: number }> = {};
+    const keys: string[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date();
       d.setMonth(d.getMonth() - i);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       const name = d.toLocaleDateString('es-AR', { month: 'short' });
-      months[key] = { month: name, ingresos: 0, gastos: 0 };
-      last6Months.push(key);
+      months[key] = { month: name, Ingresos: 0, Gastos: 0 };
+      keys.push(key);
     }
-
-    incomes.forEach(inc => {
-      if (!inc.date) return;
-      const key = inc.date.substring(0, 7);
-      if (months[key]) months[key].ingresos += inc.amount;
-    });
-
-    farmExpenses.forEach(exp => {
-      if (!exp.date) return;
-      const key = exp.date.substring(0, 7);
-      if (months[key]) months[key].gastos += exp.amount;
-    });
-
-    return last6Months.map(key => months[key]);
+    incomes.forEach(i => { const k = (i.date || '').substring(0, 7); if (months[k]) months[k].Ingresos += i.amount || 0; });
+    farmExpenses.forEach(e => { const k = (e.date || '').substring(0, 7); if (months[k]) months[k].Gastos += e.amount || 0; });
+    return keys.map(k => months[k]);
   }, [incomes, farmExpenses]);
 
-  // Expenses by Category
   const expenseByCategory = useMemo(() => {
-    const categories: Record<string, number> = {};
-    farmExpenses.forEach(exp => {
-      categories[exp.category] = (categories[exp.category] || 0) + exp.amount;
-    });
-    return Object.entries(categories).map(([name, value]) => ({ name, value }));
+    const cats: Record<string, number> = {};
+    farmExpenses.forEach(e => { cats[e.category] = (cats[e.category] || 0) + e.amount; });
+    return Object.entries(cats).map(([name, value]) => ({ name, value }));
   }, [farmExpenses]);
 
-  // Livestock by Category
   const animalsByCategory = useMemo(() => {
-    const categories: Record<string, number> = {};
-    animals.filter(a => a.status === 'Activo').forEach(a => {
-      categories[a.category] = (categories[a.category] || 0) + 1;
-    });
-    return Object.entries(categories).map(([name, value]) => ({ name, value }));
+    const cats: Record<string, number> = {};
+    animals.filter(a => a.status === 'Activo').forEach(a => { cats[a.category] = (cats[a.category] || 0) + 1; });
+    return Object.entries(cats).map(([name, value]) => ({ name, value }));
   }, [animals]);
 
-  // Rainfall Data (Last 10 events)
-  const rainData = useMemo(() => {
-    return farmRains
-      .slice(0, 10)
-      .reverse()
-      .map(r => {
-        const d = r.date ? new Date(r.date) : new Date();
-        return {
-          date: isNaN(d.getTime()) ? '?' : d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
-          mm: r.mm || 0
-        };
-      });
-  }, [farmRains]);
+  const rainData = useMemo(() =>
+    farmRains.slice(0, 10).reverse().map(r => {
+      const d = r.date ? new Date(r.date) : new Date();
+      return { date: isNaN(d.getTime()) ? '?' : d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }), mm: r.mm || 0 };
+    }),
+  [farmRains]);
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin"></div>
+          <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
           <p className="text-stone-500 font-medium">Cargando tablero...</p>
         </div>
       </div>
@@ -131,11 +112,11 @@ export default function DashboardModule({ farmId, farmRains, farmExpenses }: Das
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header Info */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h2 className="text-3xl font-black text-stone-900 tracking-tight">Panel de Control</h2>
-          <p className="text-stone-500">Resumen general y métricas de rendimiento</p>
+          <p className="text-stone-400 text-sm font-medium">Resumen general de tu establecimiento</p>
         </div>
         <div className="flex items-center gap-2 bg-stone-100 px-4 py-2 rounded-2xl">
           <Calendar className="w-4 h-4 text-stone-400" />
@@ -146,163 +127,222 @@ export default function DashboardModule({ farmId, farmRains, farmExpenses }: Das
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:shadow-xl hover:shadow-emerald-900/5 transition-all">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-emerald-100 rounded-2xl">
-              <Wallet className="w-6 h-6 text-emerald-600" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Balance */}
+        <div className="col-span-2 lg:col-span-1 bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2.5 bg-emerald-100 rounded-2xl">
+              <Wallet className="w-5 h-5 text-emerald-600" />
             </div>
             {stats.balance >= 0 ? (
-              <span className="flex items-center text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-                <ArrowUpRight className="w-3 h-3 mr-1" /> Saludable
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-full">
+                <ArrowUpRight className="w-3 h-3" /> Saludable
               </span>
             ) : (
-              <span className="flex items-center text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full">
-                <ArrowDownRight className="w-3 h-3 mr-1" /> Déficit
+              <span className="flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-1 rounded-full">
+                <ArrowDownRight className="w-3 h-3" /> Déficit
               </span>
             )}
           </div>
-          <p className="text-sm font-bold text-stone-400 uppercase tracking-wider">Balance Total</p>
-          <p className={`text-2xl font-black mt-1 ${stats.balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-            $ {stats.balance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Balance Total</p>
+          <p className={`text-xl font-black ${stats.balance >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            $ {stats.balance.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
           </p>
         </div>
 
-        <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:shadow-xl transition-all">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-blue-100 rounded-2xl">
-              <Users className="w-6 h-6 text-blue-600" />
-            </div>
+        {/* Ganadería */}
+        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
+          <div className="p-2.5 bg-blue-100 rounded-2xl mb-3 w-fit">
+            <Users className="w-5 h-5 text-blue-600" />
           </div>
-          <p className="text-sm font-bold text-stone-400 uppercase tracking-wider">Stock Ganadero</p>
-          <p className="text-2xl font-black text-blue-900 mt-1">{stats.activeAnimals} <span className="text-sm font-medium text-blue-400">cabezas</span></p>
+          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Stock Ganadero</p>
+          <p className="text-xl font-black text-blue-800">{stats.activeAnimals} <span className="text-xs font-semibold text-blue-400">cabezas</span></p>
         </div>
 
-        <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:shadow-xl transition-all">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-amber-100 rounded-2xl">
-              <TrendingUp className="w-6 h-6 text-amber-600" />
-            </div>
+        {/* Ingresos */}
+        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
+          <div className="p-2.5 bg-amber-100 rounded-2xl mb-3 w-fit">
+            <TrendingUp className="w-5 h-5 text-amber-600" />
           </div>
-          <p className="text-sm font-bold text-stone-400 uppercase tracking-wider">Total Ingresos</p>
-          <p className="text-2xl font-black text-amber-700 mt-1">$ {stats.totalIncomes.toLocaleString('es-AR')}</p>
+          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Total Ingresos</p>
+          <p className="text-xl font-black text-amber-700">$ {stats.totalIncomes.toLocaleString('es-AR', { minimumFractionDigits: 0 })}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-[2rem] border border-stone-200 shadow-sm hover:shadow-xl transition-all">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-sky-100 rounded-2xl">
-              <CloudRain className="w-6 h-6 text-sky-600" />
-            </div>
+        {/* Lluvia */}
+        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
+          <div className="p-2.5 bg-sky-100 rounded-2xl mb-3 w-fit">
+            <CloudRain className="w-5 h-5 text-sky-500" />
           </div>
-          <p className="text-sm font-bold text-stone-400 uppercase tracking-wider">Lluvia Total</p>
-          <p className="text-2xl font-black text-sky-900 mt-1">{stats.totalRain} <span className="text-sm font-medium text-sky-400">mm</span></p>
+          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Lluvia Total</p>
+          <p className="text-xl font-black text-sky-700">{stats.totalRain.toFixed(0)} <span className="text-xs font-semibold text-sky-400">mm</span></p>
         </div>
       </div>
 
-      {/* Main Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Cash Flow Chart */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm h-[400px]">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-stone-100 rounded-xl">
-              <Activity className="w-5 h-5 text-stone-600" />
+      {/* Charts row 1 */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* Cash Flow - wider */}
+        <div className="lg:col-span-3 bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-6">
+            <div className="p-2 bg-emerald-50 rounded-xl">
+              <Activity className="w-4 h-4 text-emerald-600" />
             </div>
-            <h3 className="text-lg font-black text-stone-800 tracking-tight">Flujo de Caja Mensual</h3>
+            <h3 className="text-base font-black text-stone-800">Flujo de Caja Mensual</h3>
           </div>
-          <ResponsiveContainer width="100%" height="80%">
-            <BarChart data={cashFlowData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
-              <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `$${value/1000}k`} />
-              <Tooltip 
-                contentStyle={{borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                cursor={{fill: '#f9fafb'}}
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={cashFlowData} barGap={3} barCategoryGap="35%">
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 600 }}
               />
-              <Legend iconType="circle" wrapperStyle={{paddingTop: '20px'}} />
-              <Bar dataKey="ingresos" fill="#10b981" radius={[4, 4, 0, 0]} name="Ingresos" />
-              <Bar dataKey="gastos" fill="#ef4444" radius={[4, 4, 0, 0]} name="Gastos" />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={formatCurrency}
+                width={52}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                formatter={(value: number) => [`$ ${value.toLocaleString('es-AR', { minimumFractionDigits: 0 })}`, undefined]}
+                cursor={{ fill: '#f8fafc', radius: 6 }}
+              />
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: '12px', fontWeight: 700, paddingTop: '16px' }}
+              />
+              <Bar dataKey="Ingresos" fill="#10b981" radius={[6, 6, 2, 2]} />
+              <Bar dataKey="Gastos" fill="#f43f5e" radius={[6, 6, 2, 2]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Expenses by Category */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm h-[400px]">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-stone-100 rounded-xl">
-              <PieChartIcon className="w-5 h-5 text-stone-600" />
+        {/* Expenses Pie */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-2 bg-amber-50 rounded-xl">
+              <PieChartIcon className="w-4 h-4 text-amber-600" />
             </div>
-            <h3 className="text-lg font-black text-stone-800 tracking-tight">Distribución de Gastos</h3>
+            <h3 className="text-base font-black text-stone-800">Gastos por Rubro</h3>
           </div>
-          <div className="flex items-center h-[80%]">
-            <ResponsiveContainer width="100%" height="100%">
+          {expenseByCategory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-56 text-stone-300">
+              <PieChartIcon className="w-10 h-10 mb-2" />
+              <p className="text-sm font-medium text-stone-400">Sin gastos registrados</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   data={expenseByCategory}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={5}
+                  cy="42%"
+                  innerRadius={62}
+                  outerRadius={95}
+                  paddingAngle={4}
                   dataKey="value"
+                  strokeWidth={0}
                 >
-                  {expenseByCategory.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {expenseByCategory.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
                   ))}
                 </Pie>
-                <Tooltip 
-                   contentStyle={{borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value: number) => [`$ ${value.toLocaleString('es-AR', { minimumFractionDigits: 0 })}`, undefined]}
                 />
-                <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle" />
+                <Legend
+                  layout="horizontal"
+                  align="center"
+                  verticalAlign="bottom"
+                  iconType="circle"
+                  iconSize={8}
+                  wrapperStyle={{ fontSize: '11px', fontWeight: 700, paddingTop: '12px' }}
+                />
               </PieChart>
             </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Charts row 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Rainfall */}
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-6">
+            <div className="p-2 bg-sky-50 rounded-xl">
+              <Droplets className="w-4 h-4 text-sky-500" />
+            </div>
+            <h3 className="text-base font-black text-stone-800">Evolución de Lluvias</h3>
           </div>
+          {rainData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-stone-300">
+              <CloudRain className="w-10 h-10 mb-2" />
+              <p className="text-sm font-medium text-stone-400">Sin registros de lluvia</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={rainData} margin={{ left: -10 }}>
+                <defs>
+                  <linearGradient id="rainGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} unit=" mm" width={50} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v: number) => [`${v} mm`, 'Lluvia']}
+                />
+                <Area type="monotone" dataKey="mm" stroke="#3b82f6" strokeWidth={3} fill="url(#rainGrad)" dot={{ fill: '#3b82f6', r: 4, strokeWidth: 0 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
-        {/* Recent Rainfall */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm h-[400px]">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-stone-100 rounded-xl">
-              <CloudRain className="w-5 h-5 text-stone-600" />
+        {/* Hacienda */}
+        <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-6">
+            <div className="p-2 bg-blue-50 rounded-xl">
+              <BarChart3 className="w-4 h-4 text-blue-500" />
             </div>
-            <h3 className="text-lg font-black text-stone-800 tracking-tight">Evolución de Lluvias (u8 eventos)</h3>
+            <h3 className="text-base font-black text-stone-800">Composición de Hacienda</h3>
           </div>
-          <ResponsiveContainer width="100%" height="80%">
-            <AreaChart data={rainData}>
-              <defs>
-                <linearGradient id="colorRain" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
-              <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
-              <Tooltip 
-                contentStyle={{borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-              />
-              <Area type="monotone" dataKey="mm" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRain)" strokeWidth={3} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Livestock Composition */}
-        <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm h-[400px]">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-stone-100 rounded-xl">
-              <BarChart3 className="w-5 h-5 text-stone-600" />
+          {animalsByCategory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-stone-300">
+              <Users className="w-10 h-10 mb-2" />
+              <p className="text-sm font-medium text-stone-400">Sin animales activos</p>
             </div>
-            <h3 className="text-lg font-black text-stone-800 tracking-tight">Composición de Hacienda</h3>
-          </div>
-          <ResponsiveContainer width="100%" height="80%">
-            <BarChart data={animalsByCategory} layout="vertical" margin={{left: 20}}>
-              <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#4b5563', fontWeight: 'bold', fontSize: 12}} width={80} />
-              <Tooltip 
-                contentStyle={{borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-              />
-              <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} name="Animales" />
-            </BarChart>
-          </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={animalsByCategory} layout="vertical" margin={{ left: 8, right: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: '#475569', fontWeight: 700, fontSize: 12 }}
+                  width={90}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v: number) => [`${v} cabezas`, 'Stock']}
+                />
+                <Bar dataKey="value" radius={[0, 6, 6, 0]} name="Animales">
+                  {animalsByCategory.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

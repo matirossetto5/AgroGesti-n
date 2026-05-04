@@ -1478,61 +1478,67 @@ export default function AgroApp() {
                             <p>No hay gastos registrados para estos filtros.</p>
                           </div>
                         ) : (
-                          <div className="overflow-x-auto border border-stone-200 rounded-lg">
-                            <table className="w-full text-left border-collapse">
+                          <div className="border border-stone-200 rounded-lg">
+                            <table className="w-full text-left border-collapse table-fixed">
+                              <colgroup>
+                                <col style={{width: '86px'}} />
+                                <col style={{width: '108px'}} />
+                                <col />
+                                <col style={{width: '118px'}} />
+                                <col style={{width: '68px'}} />
+                              </colgroup>
                               <thead>
-                                <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 text-sm">
-                                  <th className="py-3 px-4 font-medium">Fecha</th>
-                                  <th className="py-3 px-4 font-medium">Rubro</th>
-                                  <th className="py-3 px-4 font-medium">Descripción</th>
-                                  <th className="py-3 px-4 font-medium text-right">Monto</th>
-                                  <th className="py-3 px-4 w-20"></th>
+                                <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 text-xs font-semibold uppercase tracking-wide">
+                                  <th className="py-2.5 px-3">Fecha</th>
+                                  <th className="py-2.5 px-3">Rubro</th>
+                                  <th className="py-2.5 px-3">Descripción</th>
+                                  <th className="py-2.5 px-3 text-right">Monto</th>
+                                  <th className="py-2.5 px-3"></th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {filteredExpenses.map(expense => (
                                   <tr key={expense.id} className={`border-b border-stone-100 hover:bg-stone-50 group ${editingExpenseId === expense.id ? 'bg-amber-50/50' : ''}`}>
-                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-stone-600">
+                                    <td className="py-2.5 px-3 text-xs text-stone-500 font-medium">
                                       {new Date(expense.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
                                     </td>
-                                    <td className="py-3 px-4 text-sm">
-                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    <td className="py-2.5 px-3">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold leading-tight ${
                                         expense.category === 'Ganaderos' ? 'bg-orange-100 text-orange-800' :
                                         expense.category === 'Agrícolas' ? 'bg-emerald-100 text-emerald-800' :
-                                        'bg-stone-100 text-stone-800'
+                                        expense.category === 'Maquinaria' ? 'bg-blue-100 text-blue-800' :
+                                        'bg-stone-100 text-stone-700'
                                       }`}>
                                         {expense.category}
                                       </span>
                                     </td>
-                                    <td className="py-3 px-4 font-medium text-stone-800">
-                                      <div className="flex flex-col">
-                                        <span>{expense.description}</span>
-                                        {expense.machineId && (
-                                          <span className="text-[10px] text-emerald-600 flex items-center gap-1 font-bold">
-                                            <Wrench className="w-3 h-3" />
-                                            {machines.find(m => m.id === expense.machineId)?.name || 'Máquina no encontrada'}
-                                          </span>
-                                        )}
-                                      </div>
+                                    <td className="py-2.5 px-3 font-medium text-stone-800 min-w-0">
+                                      <p className="truncate text-sm">{expense.description}</p>
+                                      {expense.machineId && (
+                                        <span className="text-[10px] text-emerald-600 flex items-center gap-1 font-bold truncate">
+                                          <Wrench className="w-3 h-3 shrink-0" />
+                                          <span className="truncate">{machines.find(m => m.id === expense.machineId)?.name || 'Máquina no encontrada'}</span>
+                                        </span>
+                                      )}
                                     </td>
-                                    <td className="py-3 px-4 text-right text-amber-700 font-semibold whitespace-nowrap">
-                                      $ {expense.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                    <td className="py-2.5 px-3 text-right text-amber-700 font-bold text-sm">
+                                      $ {expense.amount.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
                                     </td>
-                                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                                      <div className="flex justify-end gap-2">
-                                        <button 
-                                          onClick={() => startEditExpense(expense)} 
-                                          className="text-stone-400 hover:text-blue-600 p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                                    <td className="py-2.5 px-3">
+                                      <div className="flex justify-end gap-1">
+                                        <button
+                                          onClick={() => startEditExpense(expense)}
+                                          className="text-stone-300 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors"
                                           title="Editar"
                                         >
-                                          <Edit className="w-4 h-4" />
+                                          <Edit className="w-3.5 h-3.5" />
                                         </button>
-                                        <button 
-                                          onClick={() => requestConfirm('Eliminar Gasto', `¿Estás seguro de que deseas eliminar el gasto "${expense.description}"?`, () => deleteExpense(expense.id))} 
-                                          className="text-stone-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                                        <button
+                                          onClick={() => requestConfirm('Eliminar Gasto', `¿Eliminar el gasto "${expense.description}"?`, () => deleteExpense(expense.id))}
+                                          className="text-stone-300 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
                                           title="Eliminar"
                                         >
-                                          <Trash2 className="w-4 h-4" />
+                                          <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
                                     </td>
@@ -1540,10 +1546,10 @@ export default function AgroApp() {
                                 ))}
                               </tbody>
                               <tfoot>
-                                <tr className="bg-stone-100 font-semibold text-stone-800 border-t-2 border-stone-200">
-                                  <td colSpan={3} className="py-3 px-4 text-right">Total Filtrado:</td>
-                                  <td className="py-3 px-4 text-right text-amber-800 text-lg">
-                                    $ {filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                <tr className="bg-stone-50 font-bold text-stone-800 border-t-2 border-stone-200">
+                                  <td colSpan={3} className="py-3 px-3 text-right text-sm">Total filtrado:</td>
+                                  <td className="py-3 px-3 text-right text-amber-800 font-black">
+                                    $ {filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString('es-AR', { minimumFractionDigits: 0 })}
                                   </td>
                                   <td></td>
                                 </tr>
