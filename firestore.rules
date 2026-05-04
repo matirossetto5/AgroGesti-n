@@ -15,10 +15,16 @@ service cloud.firestore {
     match /farms/{farmId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
-      
+
       match /{subcollection}/{document=**} {
         allow read: if isAuthenticated();
         allow write: if isAuthenticated();
+      }
+
+      // Presence tracking: each user can write/delete their own presence record
+      match /presence/{userId} {
+        allow read: if isAuthenticated();
+        allow write, delete: if isAuthenticated() && request.auth.uid == userId;
       }
     }
 
