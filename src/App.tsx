@@ -464,23 +464,15 @@ export default function AgroApp() {
   };
 
   const deleteFarm = async (id: string) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Eliminar Establecimiento',
-      message: '¿Estás seguro de eliminar este establecimiento? Esta acción borrará permanentemente todos los datos asociados.',
-      onConfirm: async () => {
-        setIsActionLoading(true);
-        try {
-          await deleteDoc(doc(db, 'farms', id));
-          if (selectedFarmId === id) setSelectedFarmId(null);
-        } catch (error) {
-          handleFirestoreError(error, 'delete' as any, `farms/${id}`, auth);
-        } finally {
-          setIsActionLoading(false);
-          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-        }
-      }
-    });
+    setIsActionLoading(true);
+    try {
+      await deleteDoc(doc(db, 'farms', id));
+      if (selectedFarmId === id) setSelectedFarmId(null);
+    } catch (error) {
+      handleFirestoreError(error, 'delete' as any, `farms/${id}`, auth);
+    } finally {
+      setIsActionLoading(false);
+    }
   };
 
   // --- RAIN ACTIONS ---
@@ -760,33 +752,39 @@ export default function AgroApp() {
 
       {/* Custom Confirm Modal */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-200">
-            <h3 className="text-xl font-semibold text-stone-900 mb-2">{confirmDialog.title}</h3>
-            <p className="text-stone-600 mb-6">{confirmDialog.message}</p>
-            <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))} 
-                className="px-4 py-2 text-stone-600 hover:bg-stone-100 rounded-lg font-medium transition-colors"
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 animate-in fade-in zoom-in duration-200 border border-stone-100">
+            <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-5">
+              <Trash2 className="w-7 h-7 text-red-500" />
+            </div>
+            <h3 className="text-xl font-black text-stone-900 mb-2">{confirmDialog.title}</h3>
+            <p className="text-stone-500 mb-8 leading-relaxed">{confirmDialog.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                className="flex-1 px-4 py-3 text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-2xl font-bold transition-colors"
               >
                 Cancelar
               </button>
-              <button 
-                onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(prev => ({ ...prev, isOpen: false })); }} 
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+              <button
+                onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(prev => ({ ...prev, isOpen: false })); }}
+                className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors shadow-lg shadow-red-200"
               >
-                Confirmar
+                Eliminar
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-[50] border-b border-stone-200 px-4 py-3 sm:px-6">
+      <header className="bg-white/90 backdrop-blur-md sticky top-0 z-[50] border-b border-stone-200/80 px-4 py-3 sm:px-6 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AppLogo className="w-10 h-10" />
-            <h1 className="text-xl font-bold text-stone-900 tracking-tight sm:text-2xl">AgroGestión</h1>
+            <div>
+              <h1 className="text-xl font-black text-stone-900 tracking-tight sm:text-2xl leading-none">AgroGestión</h1>
+              <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-widest hidden sm:block">Control inteligente</p>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             {selectedFarmId && (
@@ -1042,12 +1040,18 @@ export default function AgroApp() {
             </div>
 
             <div className="md:col-span-2">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200 min-h-[500px]">
-                <h2 className="text-lg font-medium mb-4">Mis Campos</h2>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 min-h-[500px]">
+                <h2 className="text-lg font-black text-stone-800 mb-5 flex items-center gap-2">
+                  <Wheat className="w-5 h-5 text-emerald-600" />
+                  Mis Campos
+                </h2>
                 {farms.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-64 text-stone-400">
-                    <AppLogo className="w-16 h-16 mb-4 opacity-20 grayscale" />
-                    <p className="font-medium">No hay campos registrados aún.</p>
+                    <div className="w-20 h-20 rounded-3xl bg-stone-100 flex items-center justify-center mb-4">
+                      <Wheat className="w-10 h-10 text-stone-300" />
+                    </div>
+                    <p className="font-semibold text-stone-500 mb-1">Sin campos registrados</p>
+                    <p className="text-sm text-stone-400">Crea tu primer campo con el formulario</p>
                   </div>
                 ) : (
                   <div className="grid gap-4">
