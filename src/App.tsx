@@ -137,6 +137,8 @@ export default function AgroApp() {
 
   // Modal State
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [showRainModal, setShowRainModal] = useState(false);
 
   // Forms state
   const [farmForm, setFarmForm] = useState({ name: '', location: '', coordinates: '', owner: '', manager: '' });
@@ -488,6 +490,7 @@ export default function AgroApp() {
       
       await updateDoc(doc(db, 'farms', selectedFarmId), { rains: updatedRains });
       setRainForm({ date: '', mm: '' });
+      setShowRainModal(false);
     } catch (error) {
        handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
     } finally {
@@ -549,6 +552,7 @@ export default function AgroApp() {
       await updateDoc(doc(db, 'farms', selectedFarmId), { expenses: updatedExpenses });
       setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '', machineId: '' });
       setEditingExpenseId(null);
+      setShowExpenseModal(false);
     } catch (error) {
        handleFirestoreError(error, 'update' as any, `farms/${selectedFarmId}`, auth);
     } finally {
@@ -565,11 +569,13 @@ export default function AgroApp() {
       machineId: expense.machineId || ''
     });
     setEditingExpenseId(expense.id);
+    setShowExpenseModal(true);
   };
 
   const cancelEditExpense = () => {
-    setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '' });
+    setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '', machineId: '' });
     setEditingExpenseId(null);
+    setShowExpenseModal(false);
   };
 
   const deleteExpense = async (expenseId: string) => {
@@ -1258,219 +1264,144 @@ export default function AgroApp() {
                 )}
 
                 {activeTab === 'lluvias' && (
-                  <div>
-                    <h3 className="text-xl font-semibold mb-6 text-stone-800 border-b pb-4 flex items-center gap-2">
-                      <CloudRain className="w-6 h-6 text-blue-500" />
-                      Registro de Lluvias
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                      <div className="lg:col-span-1">
-                        <form onSubmit={handleAddRain} className="bg-stone-50 p-4 rounded-lg border border-stone-200 sticky top-4">
-                          <h4 className="font-medium text-stone-800 mb-4">Nueva Medición</h4>
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Fecha</label>
-                              <input type="date" required value={rainForm.date} onChange={e => setRainForm({...rainForm, date: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
-                            </div>
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Milímetros (mm)</label>
-                              <input type="number" step="0.1" min="0" required value={rainForm.mm} onChange={e => setRainForm({...rainForm, mm: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="Ej: 15.5" />
-                            </div>
-                            <button type="submit" disabled={isActionLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors font-medium disabled:opacity-50">
-                                {isActionLoading ? 'Guardando...' : 'Registrar Lluvia'}
-                            </button>
-                          </div>
-                        </form>
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b pb-4">
+                      <div className="flex items-center gap-3">
+                        <CloudRain className="w-6 h-6 text-blue-500" />
+                        <h3 className="text-xl font-bold text-stone-800">Registro de Lluvias</h3>
                       </div>
-                      
-                      <div className="lg:col-span-2">
-                        {/* Rain Filters & Analysis */}
-                        <div className="bg-white border border-stone-200 rounded-lg p-4 mb-6 shadow-sm">
-                          <div className="flex flex-wrap gap-4 items-end mb-4 border-b border-stone-100 pb-4">
-                            <div className="flex items-center gap-2 w-full mb-1">
-                              <Filter className="w-4 h-4 text-stone-400" />
-                              <span className="text-sm font-medium text-stone-700">Filtros</span>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-stone-500 mb-1">Desde fecha</label>
-                              <input type="date" value={rainFilters.startDate} onChange={e => setRainFilters({...rainFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded text-sm bg-stone-50" />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-stone-500 mb-1">Hasta fecha</label>
-                              <input type="date" value={rainFilters.endDate} onChange={e => setRainFilters({...rainFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded text-sm bg-stone-50" />
-                            </div>
-                            {(rainFilters.startDate || rainFilters.endDate) && (
-                              <button onClick={() => setRainFilters({startDate: '', endDate: ''})} className="text-sm text-blue-600 hover:text-blue-800 px-2 py-1.5 font-medium">Limpiar filtros</button>
-                            )}
-                          </div>
-                          
-                          <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-blue-50/50 p-3 rounded-lg text-center border border-blue-100">
-                              <p className="text-xs text-blue-600 font-medium mb-1 uppercase tracking-wider">Total Acumulado</p>
-                              <p className="text-2xl font-bold text-blue-900">{totalRain.toFixed(1)} <span className="text-sm font-normal text-blue-700">mm</span></p>
-                            </div>
-                            <div className="bg-blue-50/50 p-3 rounded-lg text-center border border-blue-100">
-                              <p className="text-xs text-blue-600 font-medium mb-1 uppercase tracking-wider">Eventos</p>
-                              <p className="text-2xl font-bold text-blue-900">{filteredRains.length}</p>
-                            </div>
-                            <div className="bg-blue-50/50 p-3 rounded-lg text-center border border-blue-100">
-                              <p className="text-xs text-blue-600 font-medium mb-1 uppercase tracking-wider">Lluvia Máxima</p>
-                              <p className="text-2xl font-bold text-blue-900">{maxRain.toFixed(1)} <span className="text-sm font-normal text-blue-700">mm</span></p>
-                            </div>
-                          </div>
-                        </div>
+                      <button
+                        onClick={() => { setRainForm({ date: '', mm: '' }); setShowRainModal(true); }}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl transition-colors shadow-sm text-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Nueva Medición
+                      </button>
+                    </div>
 
-                        {filteredRains.length === 0 ? (
-                          <div className="text-center py-12 text-stone-500 bg-stone-50 rounded-lg border border-dashed border-stone-300">
-                            <Droplets className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p>No hay registros de lluvia para este período.</p>
-                          </div>
-                        ) : (
-                          <div className="overflow-x-auto border border-stone-200 rounded-lg">
-                            <table className="w-full text-left border-collapse">
-                              <thead>
-                                <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 text-sm">
-                                  <th className="py-3 px-4 font-medium">Fecha</th>
-                                  <th className="py-3 px-4 font-medium text-right">Milímetros (mm)</th>
-                                  <th className="py-3 px-4 w-16"></th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {filteredRains.map(rain => (
-                                  <tr key={rain.id} className="border-b border-stone-100 hover:bg-stone-50 group">
-                                    <td className="py-3 px-4 font-medium text-stone-800">
-                                      {new Date(rain.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
-                                    </td>
-                                    <td className="py-3 px-4 text-right text-blue-700 font-semibold">
-                                      {rain.mm} mm
-                                    </td>
-                                    <td className="py-3 px-4 text-right">
-                                      <button 
-                                        onClick={() => requestConfirm('Eliminar Registro', '¿Estás seguro de que deseas eliminar este registro de lluvia?', () => deleteRain(rain.id))} 
-                                        className="text-stone-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                                        title="Eliminar"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
+                    {/* Stats */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl text-center">
+                        <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-1">Total Acumulado</p>
+                        <p className="text-2xl font-black text-blue-900">{totalRain.toFixed(1)} <span className="text-sm font-normal text-blue-500">mm</span></p>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl text-center">
+                        <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-1">Eventos</p>
+                        <p className="text-2xl font-black text-blue-900">{filteredRains.length}</p>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl text-center">
+                        <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-1">Máxima</p>
+                        <p className="text-2xl font-black text-blue-900">{maxRain.toFixed(1)} <span className="text-sm font-normal text-blue-500">mm</span></p>
                       </div>
                     </div>
+
+                    {/* Filters */}
+                    <div className="flex flex-wrap gap-3 items-end bg-stone-50 border border-stone-200 rounded-xl p-3">
+                      <Filter className="w-4 h-4 text-stone-400 self-center" />
+                      <div>
+                        <label className="block text-xs text-stone-500 mb-1 font-medium">Desde</label>
+                        <input type="date" value={rainFilters.startDate} onChange={e => setRainFilters({...rainFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-stone-500 mb-1 font-medium">Hasta</label>
+                        <input type="date" value={rainFilters.endDate} onChange={e => setRainFilters({...rainFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                      </div>
+                      {(rainFilters.startDate || rainFilters.endDate) && (
+                        <button onClick={() => setRainFilters({startDate: '', endDate: ''})} className="text-xs text-blue-600 hover:text-blue-800 px-3 py-1.5 font-bold bg-white border border-blue-200 rounded-lg">Limpiar</button>
+                      )}
+                    </div>
+
+                    {/* Table */}
+                    {filteredRains.length === 0 ? (
+                      <div className="text-center py-16 text-stone-400 bg-stone-50 rounded-2xl border border-dashed border-stone-200">
+                        <Droplets className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                        <p className="font-semibold">Sin registros para este período</p>
+                        <button onClick={() => { setRainForm({ date: '', mm: '' }); setShowRainModal(true); }} className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-bold">+ Registrar primer lluvia</button>
+                      </div>
+                    ) : (
+                      <div className="border border-stone-200 rounded-xl overflow-hidden">
+                        <table className="w-full text-left border-collapse table-fixed">
+                          <colgroup>
+                            <col style={{width: '140px'}} />
+                            <col />
+                            <col style={{width: '56px'}} />
+                          </colgroup>
+                          <thead>
+                            <tr className="bg-stone-50 border-b border-stone-200 text-stone-500 text-xs font-bold uppercase tracking-wide">
+                              <th className="py-3 px-4">Fecha</th>
+                              <th className="py-3 px-4 text-right">Milímetros</th>
+                              <th className="py-3 px-4"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredRains.map(rain => (
+                              <tr key={rain.id} className="border-b border-stone-100 hover:bg-stone-50">
+                                <td className="py-3 px-4 font-medium text-stone-800 text-sm">
+                                  {new Date(rain.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
+                                </td>
+                                <td className="py-3 px-4 text-right font-bold text-blue-700">
+                                  {rain.mm} mm
+                                </td>
+                                <td className="py-3 px-4">
+                                  <button
+                                    onClick={() => requestConfirm('Eliminar Registro', '¿Eliminar este registro de lluvia?', () => deleteRain(rain.id))}
+                                    className="text-stone-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {activeTab === 'gastos' && (
-                  <div>
-                    <h3 className="text-xl font-semibold mb-6 text-stone-800 border-b pb-4 flex items-center gap-2">
-                      <Wallet className="w-6 h-6 text-amber-600" />
-                      Gestión de Gastos
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-                      <div className="xl:col-span-1">
-                        <form onSubmit={handleExpenseSubmit} className={`p-4 rounded-lg border ${editingExpenseId ? 'bg-amber-50 border-amber-200' : 'bg-stone-50 border-stone-200'} sticky top-4`}>
-                          <div className="flex justify-between items-center mb-4">
-                            <h4 className={`font-medium ${editingExpenseId ? 'text-amber-800' : 'text-stone-800'}`}>
-                              {editingExpenseId ? 'Editar Gasto' : 'Nuevo Gasto'}
-                            </h4>
-                            {editingExpenseId && (
-                              <button type="button" onClick={cancelEditExpense} className="text-amber-600 hover:text-amber-800 p-1">
-                                <X className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Fecha</label>
-                              <input type="date" required value={expenseForm.date} onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white" />
-                            </div>
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Rubro</label>
-                              <select 
-                                value={expenseForm.category} 
-                                onChange={e => setExpenseForm({...expenseForm, category: e.target.value})} 
-                                className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white"
-                              >
-                                <option value="Gastos generales">Gastos generales</option>
-                                <option value="Ganaderos">Ganaderos</option>
-                                <option value="Agrícolas">Agrícolas</option>
-                                <option value="Maquinaria">Maquinaria</option>
-                              </select>
-                            </div>
-                            {expenseForm.category === 'Maquinaria' && (
-                              <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                                <label className="block text-sm text-stone-600 mb-1">Afectado a Maquinaria</label>
-                                <select 
-                                  required
-                                  value={expenseForm.machineId} 
-                                  onChange={e => setExpenseForm({...expenseForm, machineId: e.target.value})} 
-                                  className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-emerald-50/50 font-medium"
-                                >
-                                  <option value="">Seleccionar máquina...</option>
-                                  {machines.map(m => (
-                                    <option key={m.id} value={m.id}>{m.name} ({m.brand})</option>
-                                  ))}
-                                </select>
-                                {machines.length === 0 && (
-                                  <p className="text-[10px] text-red-500 mt-1 italic">No hay maquinarias registradas en este campo.</p>
-                                )}
-                              </div>
-                            )}
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Descripción breve</label>
-                              <input type="text" required value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white" placeholder="Ej: Compra de gasoil" />
-                            </div>
-                            <div>
-                              <label className="block text-sm text-stone-600 mb-1">Monto ($)</label>
-                              <input type="number" step="0.01" min="0" required value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full px-3 py-2 border border-stone-300 rounded focus:ring-2 focus:ring-amber-500 outline-none bg-white" placeholder="Ej: 150000" />
-                            </div>
-                            <button type="submit" disabled={isActionLoading} className={`w-full py-2 rounded transition-colors font-medium text-white disabled:opacity-50 ${editingExpenseId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-stone-800 hover:bg-stone-900'}`}>
-                               {isActionLoading ? 'Guardando...' : (editingExpenseId ? 'Actualizar Gasto' : 'Registrar Gasto')}
-                            </button>
-                          </div>
-                        </form>
+                  <div className="space-y-5">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b pb-4">
+                      <div className="flex items-center gap-3">
+                        <Wallet className="w-6 h-6 text-amber-600" />
+                        <h3 className="text-xl font-bold text-stone-800">Gestión de Gastos</h3>
                       </div>
-                      
-                      <div className="xl:col-span-2">
-                        {/* Charts */}
-                        {/* Charts removed for debugging */}
+                      <button
+                        onClick={() => { setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '', machineId: '' }); setEditingExpenseId(null); setShowExpenseModal(true); }}
+                        className="flex items-center gap-2 bg-stone-900 hover:bg-stone-700 text-white font-bold px-4 py-2 rounded-xl transition-colors shadow-sm text-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Nuevo Gasto
+                      </button>
+                    </div>
 
-                        {/* Expense Filters */}
-                        <div className="bg-white border border-stone-200 p-4 rounded-lg mb-6 flex flex-wrap gap-4 items-end shadow-sm">
-                          <div className="flex items-center gap-2 w-full mb-1">
-                            <Filter className="w-4 h-4 text-stone-400" />
-                            <span className="text-sm font-medium text-stone-700">Filtros</span>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-stone-500 mb-1">Rubro</label>
-                            <select value={expenseFilters.category} onChange={e => setExpenseFilters({...expenseFilters, category: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded text-sm bg-stone-50 min-w-[140px]">
-                              <option value="Todos">Todos</option>
-                              <option value="Gastos generales">Gastos generales</option>
-                              <option value="Ganaderos">Ganaderos</option>
-                              <option value="Agrícolas">Agrícolas</option>
-                              <option value="Maquinaria">Maquinaria</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-stone-500 mb-1">Desde fecha</label>
-                            <input type="date" value={expenseFilters.startDate} onChange={e => setExpenseFilters({...expenseFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded text-sm bg-stone-50" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-stone-500 mb-1">Hasta fecha</label>
-                            <input type="date" value={expenseFilters.endDate} onChange={e => setExpenseFilters({...expenseFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded text-sm bg-stone-50" />
-                          </div>
-                          {(expenseFilters.category !== 'Todos' || expenseFilters.startDate || expenseFilters.endDate) && (
-                            <button onClick={() => setExpenseFilters({category: 'Todos', startDate: '', endDate: ''})} className="text-sm text-amber-600 hover:text-amber-800 px-2 py-1.5 font-medium">
-                              Limpiar filtros
-                            </button>
-                          )}
-                        </div>
+                    {/* Filters */}
+                    <div className="flex flex-wrap gap-3 items-end bg-stone-50 border border-stone-200 rounded-xl p-3">
+                      <Filter className="w-4 h-4 text-stone-400 self-center" />
+                      <div>
+                        <label className="block text-xs text-stone-500 mb-1 font-medium">Rubro</label>
+                        <select value={expenseFilters.category} onChange={e => setExpenseFilters({...expenseFilters, category: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white">
+                          <option value="Todos">Todos</option>
+                          <option value="Gastos generales">Gastos generales</option>
+                          <option value="Ganaderos">Ganaderos</option>
+                          <option value="Agrícolas">Agrícolas</option>
+                          <option value="Maquinaria">Maquinaria</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-stone-500 mb-1 font-medium">Desde</label>
+                        <input type="date" value={expenseFilters.startDate} onChange={e => setExpenseFilters({...expenseFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-stone-500 mb-1 font-medium">Hasta</label>
+                        <input type="date" value={expenseFilters.endDate} onChange={e => setExpenseFilters({...expenseFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                      </div>
+                      {(expenseFilters.category !== 'Todos' || expenseFilters.startDate || expenseFilters.endDate) && (
+                        <button onClick={() => setExpenseFilters({category: 'Todos', startDate: '', endDate: ''})} className="text-xs text-amber-600 hover:text-amber-800 px-3 py-1.5 font-bold bg-white border border-amber-200 rounded-lg">Limpiar</button>
+                      )}
+                    </div>
+
+                    <div className="w-full">
 
                         {filteredExpenses.length === 0 ? (
                           <div className="text-center py-12 text-stone-500 bg-stone-50 rounded-lg border border-dashed border-stone-300">
@@ -1558,7 +1489,6 @@ export default function AgroApp() {
                           </div>
                         )}
                       </div>
-                    </div>
                   </div>
                 )}
 
@@ -1572,6 +1502,101 @@ export default function AgroApp() {
       )
     )}
   </main>
+
+  {/* ── Modal: Nuevo / Editar Gasto ── */}
+  {showExpenseModal && (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg border border-stone-100 animate-in fade-in zoom-in duration-200">
+        <div className="flex items-center justify-between p-6 border-b border-stone-100">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-xl ${editingExpenseId ? 'bg-amber-100' : 'bg-stone-100'}`}>
+              <Wallet className={`w-5 h-5 ${editingExpenseId ? 'text-amber-600' : 'text-stone-600'}`} />
+            </div>
+            <h3 className="text-lg font-black text-stone-900">{editingExpenseId ? 'Editar Gasto' : 'Nuevo Gasto'}</h3>
+          </div>
+          <button onClick={cancelEditExpense} className="p-2 hover:bg-stone-100 rounded-xl transition-colors">
+            <X className="w-5 h-5 text-stone-400" />
+          </button>
+        </div>
+        <form onSubmit={handleExpenseSubmit} className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Fecha</label>
+              <input type="date" required value={expenseForm.date} onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none bg-stone-50 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Rubro</label>
+              <select value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none bg-stone-50 text-sm">
+                <option value="Gastos generales">Gastos generales</option>
+                <option value="Ganaderos">Ganaderos</option>
+                <option value="Agrícolas">Agrícolas</option>
+                <option value="Maquinaria">Maquinaria</option>
+              </select>
+            </div>
+          </div>
+          {expenseForm.category === 'Maquinaria' && (
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Maquinaria</label>
+              <select required value={expenseForm.machineId} onChange={e => setExpenseForm({...expenseForm, machineId: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none bg-stone-50 text-sm">
+                <option value="">Seleccionar máquina...</option>
+                {machines.map(m => <option key={m.id} value={m.id}>{m.name} ({m.brand})</option>)}
+              </select>
+              {machines.length === 0 && <p className="text-[10px] text-red-500 mt-1">No hay maquinarias registradas.</p>}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Descripción</label>
+            <input type="text" required placeholder="Ej: Compra de gasoil" value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none bg-stone-50 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Monto ($)</label>
+            <input type="number" step="0.01" min="0" required placeholder="Ej: 150000" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none bg-stone-50 text-sm" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={cancelEditExpense} className="flex-1 py-3 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold transition-colors text-sm">Cancelar</button>
+            <button type="submit" disabled={isActionLoading} className={`flex-[2] py-3 rounded-2xl text-white font-black text-sm transition-colors shadow-lg disabled:opacity-50 ${editingExpenseId ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-100' : 'bg-stone-900 hover:bg-stone-700 shadow-stone-200'}`}>
+              {isActionLoading ? 'Guardando...' : (editingExpenseId ? 'Actualizar Gasto' : 'Registrar Gasto')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )}
+
+  {/* ── Modal: Nueva Lluvia ── */}
+  {showRainModal && (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm border border-stone-100 animate-in fade-in zoom-in duration-200">
+        <div className="flex items-center justify-between p-6 border-b border-stone-100">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-xl">
+              <CloudRain className="w-5 h-5 text-blue-600" />
+            </div>
+            <h3 className="text-lg font-black text-stone-900">Nueva Medición</h3>
+          </div>
+          <button onClick={() => { setShowRainModal(false); setRainForm({ date: '', mm: '' }); }} className="p-2 hover:bg-stone-100 rounded-xl transition-colors">
+            <X className="w-5 h-5 text-stone-400" />
+          </button>
+        </div>
+        <form onSubmit={handleAddRain} className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Fecha</label>
+            <input type="date" required value={rainForm.date} onChange={e => setRainForm({...rainForm, date: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none bg-stone-50 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Milímetros (mm)</label>
+            <input type="number" step="0.1" min="0" required placeholder="Ej: 15.5" value={rainForm.mm} onChange={e => setRainForm({...rainForm, mm: e.target.value})} className="w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none bg-stone-50 text-sm" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => { setShowRainModal(false); setRainForm({ date: '', mm: '' }); }} className="flex-1 py-3 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold transition-colors text-sm">Cancelar</button>
+            <button type="submit" disabled={isActionLoading} className="flex-[2] py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm transition-colors shadow-lg shadow-blue-100 disabled:opacity-50">
+              {isActionLoading ? 'Guardando...' : 'Registrar Lluvia'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )}
 </div>
 );
 }
