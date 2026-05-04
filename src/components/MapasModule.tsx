@@ -112,6 +112,16 @@ function GeomanHandler({
   return null;
 }
 
+// Force map to recalculate tile positions on mount
+function MapInvalidator() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 // Component to handle auto-centering of the map
 function MapAutoCenter({ center, lots }: { center: [number, number], lots: Lot[] }) {
   const map = useMap();
@@ -263,20 +273,22 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
 
       <div className="relative group">
         <div className="bg-stone-200 rounded-[2.5rem] p-1 shadow-inner overflow-hidden h-[600px] border border-stone-300">
-          <MapContainer 
-            center={defaultCenter} 
-            zoom={14} 
-            style={{ height: '100%', width: '100%' }}
-            className="rounded-[2.4rem] z-0"
+          <MapContainer
+            center={defaultCenter}
+            zoom={14}
+            style={{ height: '100%', width: '100%', borderRadius: '2.2rem' }}
+            scrollWheelZoom={true}
           >
             <TileLayer
-              attribution='&copy; OpenStreetMap contributors, &copy; CartoDB'
-              url="https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
               maxZoom={20}
               subdomains={['a', 'b', 'c', 'd']}
+              crossOrigin={true}
             />
-            <GeomanHandler 
-              onPolygonComplete={onPolygonComplete} 
+            <MapInvalidator />
+            <GeomanHandler
+              onPolygonComplete={onPolygonComplete}
               onPolygonEdit={onPolygonEdit}
               isEditActive={isGeometryEditActive}
             />
