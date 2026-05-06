@@ -259,6 +259,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     }
 
     setIsSubmitting(true);
+    const qty = Number(formData.quantity) || 0;
     const weightPer = Number(formData.weightPerAnimal) || 0;
     const totalWeight = calculateTotalWeight(qty, weightPer);
 
@@ -477,7 +478,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 <th className="p-4 font-medium">Nombre</th>
                 <th className="p-4 font-medium">Sexo</th>
                 <th className="p-4 font-medium">Cantidad</th>
-                <th className="p-4 font-medium">Peso/Animal (kg)</th>
+                <th className="p-4 font-medium">Peso Prom./Animal (kg)</th>
                 <th className="p-4 font-medium">Peso Total (kg)</th>
                 <th className="p-4 font-medium">Estado</th>
                 <th className="p-4 font-medium">Etapa</th>
@@ -675,7 +676,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Peso por Animal (kg)</label>
+                      <label className="text-sm font-bold text-stone-700">Peso Promedio por Animal (kg)</label>
                       <input
                         type="number"
                         required

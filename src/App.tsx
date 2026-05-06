@@ -1360,27 +1360,57 @@ export default function AgroApp() {
                 )}
 
                 {activeTab === 'gastos' && (
-                  <div className="space-y-5">
+                  <div className="space-y-6">
                     {/* Header */}
-                    <div className="flex items-center justify-between border-b pb-4">
-                      <div className="flex items-center gap-3">
-                        <Wallet className="w-6 h-6 text-amber-600" />
-                        <h3 className="text-xl font-bold text-stone-800">Gestión de Gastos</h3>
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div>
+                        <h2 className="text-2xl font-bold text-stone-900 tracking-tight">Gestión de Gastos</h2>
+                        <p className="text-stone-500 text-sm">Control de egresos y costos del campo</p>
                       </div>
                       <button
                         onClick={() => { setExpenseForm({ date: '', category: 'Gastos generales', description: '', amount: '', machineId: '' }); setEditingExpenseId(null); setShowExpenseModal(true); }}
-                        className="flex items-center gap-2 bg-stone-900 hover:bg-stone-700 text-white font-bold px-4 py-2 rounded-xl transition-colors shadow-sm text-sm"
+                        className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-2xl transition-all shadow-lg shadow-red-200 active:scale-95"
                       >
-                        <Plus className="w-4 h-4" /> Nuevo Gasto
+                        <Plus className="w-5 h-5" /> Nuevo Gasto
                       </button>
                     </div>
 
+                    {/* Resumen por categoría */}
+                    {(() => {
+                      const expCats = ['Gastos generales','Ganaderos','Agrícolas','Maquinaria'];
+                      const expTotal = (selectedFarm?.expenses || []).reduce((s: number, e: any) => s + e.amount, 0);
+                      const catColors: Record<string, string> = { 'Gastos generales': 'bg-stone-400', 'Ganaderos': 'bg-orange-500', 'Agrícolas': 'bg-emerald-500', 'Maquinaria': 'bg-blue-500' };
+                      const bycat = expCats.map(cat => {
+                        const total = (selectedFarm?.expenses || []).filter((e: any) => e.category === cat).reduce((s: number, e: any) => s + e.amount, 0);
+                        return { cat, total, pct: expTotal > 0 ? (total / expTotal) * 100 : 0 };
+                      }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+                      return bycat.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {bycat.map(({ cat, total, pct }) => (
+                            <div key={cat} className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className={`w-2.5 h-2.5 rounded-full ${catColors[cat] ?? 'bg-stone-400'}`} />
+                                <span className="text-xs font-bold text-stone-500 truncate">{cat}</span>
+                              </div>
+                              <p className="text-base font-black text-stone-900">
+                                $ {total.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                              </p>
+                              <div className="mt-2 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                                <div className={`h-full ${catColors[cat] ?? 'bg-stone-400'} rounded-full`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <p className="text-[10px] text-stone-400 font-bold mt-1">{pct.toFixed(1)}% del total</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+
                     {/* Filters */}
-                    <div className="flex flex-wrap gap-3 items-end bg-stone-50 border border-stone-200 rounded-xl p-3">
+                    <div className="flex flex-wrap gap-3 items-end bg-stone-50 border border-stone-200 rounded-2xl p-3">
                       <Filter className="w-4 h-4 text-stone-400 self-center" />
                       <div>
                         <label className="block text-xs text-stone-500 mb-1 font-medium">Rubro</label>
-                        <select value={expenseFilters.category} onChange={e => setExpenseFilters({...expenseFilters, category: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white">
+                        <select value={expenseFilters.category} onChange={e => setExpenseFilters({...expenseFilters, category: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-xl text-sm bg-white">
                           <option value="Todos">Todos</option>
                           <option value="Gastos generales">Gastos generales</option>
                           <option value="Ganaderos">Ganaderos</option>
@@ -1390,105 +1420,97 @@ export default function AgroApp() {
                       </div>
                       <div>
                         <label className="block text-xs text-stone-500 mb-1 font-medium">Desde</label>
-                        <input type="date" value={expenseFilters.startDate} onChange={e => setExpenseFilters({...expenseFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                        <input type="date" value={expenseFilters.startDate} onChange={e => setExpenseFilters({...expenseFilters, startDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-xl text-sm bg-white" />
                       </div>
                       <div>
                         <label className="block text-xs text-stone-500 mb-1 font-medium">Hasta</label>
-                        <input type="date" value={expenseFilters.endDate} onChange={e => setExpenseFilters({...expenseFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm bg-white" />
+                        <input type="date" value={expenseFilters.endDate} onChange={e => setExpenseFilters({...expenseFilters, endDate: e.target.value})} className="px-3 py-1.5 border border-stone-300 rounded-xl text-sm bg-white" />
                       </div>
                       {(expenseFilters.category !== 'Todos' || expenseFilters.startDate || expenseFilters.endDate) && (
-                        <button onClick={() => setExpenseFilters({category: 'Todos', startDate: '', endDate: ''})} className="text-xs text-amber-600 hover:text-amber-800 px-3 py-1.5 font-bold bg-white border border-amber-200 rounded-lg">Limpiar</button>
+                        <button onClick={() => setExpenseFilters({category: 'Todos', startDate: '', endDate: ''})} className="text-xs text-red-600 hover:text-red-800 px-3 py-1.5 font-bold bg-white border border-red-200 rounded-xl">Limpiar</button>
                       )}
                     </div>
 
-                    <div className="w-full">
-
+                    <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
+                      <div className="overflow-x-auto">
                         {filteredExpenses.length === 0 ? (
-                          <div className="text-center py-12 text-stone-500 bg-stone-50 rounded-lg border border-dashed border-stone-300">
-                            <Receipt className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p>No hay gastos registrados para estos filtros.</p>
+                          <div className="text-center py-12 text-stone-400 flex flex-col items-center gap-2">
+                            <Receipt className="w-12 h-12 opacity-20" />
+                            <p className="italic">No hay gastos registrados para estos filtros.</p>
                           </div>
                         ) : (
-                          <div className="border border-stone-200 rounded-lg">
-                            <table className="w-full text-left border-collapse table-fixed">
-                              <colgroup>
-                                <col style={{width: '86px'}} />
-                                <col style={{width: '108px'}} />
-                                <col />
-                                <col style={{width: '118px'}} />
-                                <col style={{width: '68px'}} />
-                              </colgroup>
-                              <thead>
-                                <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 text-xs font-semibold uppercase tracking-wide">
-                                  <th className="py-2.5 px-3">Fecha</th>
-                                  <th className="py-2.5 px-3">Rubro</th>
-                                  <th className="py-2.5 px-3">Descripción</th>
-                                  <th className="py-2.5 px-3 text-right">Monto</th>
-                                  <th className="py-2.5 px-3"></th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {filteredExpenses.map(expense => (
-                                  <tr key={expense.id} className={`border-b border-stone-100 hover:bg-stone-50 group ${editingExpenseId === expense.id ? 'bg-amber-50/50' : ''}`}>
-                                    <td className="py-2.5 px-3 text-xs text-stone-500 font-medium">
-                                      {new Date(expense.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
-                                    </td>
-                                    <td className="py-2.5 px-3">
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold leading-tight ${
-                                        expense.category === 'Ganaderos' ? 'bg-orange-100 text-orange-800' :
-                                        expense.category === 'Agrícolas' ? 'bg-emerald-100 text-emerald-800' :
-                                        expense.category === 'Maquinaria' ? 'bg-blue-100 text-blue-800' :
-                                        'bg-stone-100 text-stone-700'
-                                      }`}>
-                                        {expense.category}
-                                      </span>
-                                    </td>
-                                    <td className="py-2.5 px-3 font-medium text-stone-800 min-w-0">
-                                      <p className="truncate text-sm">{expense.description}</p>
-                                      {expense.machineId && (
-                                        <span className="text-[10px] text-emerald-600 flex items-center gap-1 font-bold truncate">
-                                          <Wrench className="w-3 h-3 shrink-0" />
-                                          <span className="truncate">{machines.find(m => m.id === expense.machineId)?.name || 'Máquina no encontrada'}</span>
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 px-3 text-right text-amber-700 font-bold text-sm">
-                                      $ {expense.amount.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-2.5 px-3">
-                                      <div className="flex justify-end gap-1">
-                                        <button
-                                          onClick={() => startEditExpense(expense)}
-                                          className="text-stone-300 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-                                          title="Editar"
-                                        >
-                                          <Edit className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          onClick={() => requestConfirm('Eliminar Gasto', `¿Eliminar el gasto "${expense.description}"?`, () => deleteExpense(expense.id))}
-                                          className="text-stone-300 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                                          title="Eliminar"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                              <tfoot>
-                                <tr className="bg-stone-50 font-bold text-stone-800 border-t-2 border-stone-200">
-                                  <td colSpan={3} className="py-3 px-3 text-right text-sm">Total filtrado:</td>
-                                  <td className="py-3 px-3 text-right text-amber-800 font-black">
-                                    $ {filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                          <table className="w-full text-left">
+                            <thead className="bg-stone-50/50 border-b border-stone-200">
+                              <tr className="text-stone-500 text-sm font-bold uppercase tracking-wider">
+                                <th className="p-4">Fecha</th>
+                                <th className="p-4">Rubro</th>
+                                <th className="p-4">Descripción</th>
+                                <th className="p-4 text-right">Monto</th>
+                                <th className="p-4 text-right">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-stone-100">
+                              {filteredExpenses.map(expense => (
+                                <tr key={expense.id} className="hover:bg-red-50/20 transition-colors group">
+                                  <td className="p-4 text-stone-600 font-medium">
+                                    {new Date(expense.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
                                   </td>
-                                  <td></td>
+                                  <td className="p-4">
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${
+                                      expense.category === 'Ganaderos' ? 'bg-orange-100 text-orange-700' :
+                                      expense.category === 'Agrícolas' ? 'bg-emerald-100 text-emerald-700' :
+                                      expense.category === 'Maquinaria' ? 'bg-blue-100 text-blue-700' :
+                                      'bg-stone-100 text-stone-600'
+                                    }`}>
+                                      {expense.category}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 font-semibold text-stone-800">
+                                    <p>{expense.description}</p>
+                                    {expense.machineId && (
+                                      <span className="text-xs text-blue-600 flex items-center gap-1 font-bold mt-0.5">
+                                        <Wrench className="w-3 h-3 shrink-0" />
+                                        {machines.find((m: any) => m.id === expense.machineId)?.name || 'Máquina no encontrada'}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-4 font-bold text-red-600 text-right text-lg">
+                                    $ {expense.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-4 text-right">
+                                    <div className="flex justify-end gap-1">
+                                      <button
+                                        onClick={() => startEditExpense(expense)}
+                                        className="p-2 text-stone-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                                        title="Editar"
+                                      >
+                                        <Edit className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        onClick={() => requestConfirm('Eliminar Gasto', `¿Eliminar el gasto "${expense.description}"?`, () => deleteExpense(expense.id))}
+                                        className="p-2 text-stone-400 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                                        title="Eliminar"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </td>
                                 </tr>
-                              </tfoot>
-                            </table>
-                          </div>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-red-50/50">
+                              <tr>
+                                <td colSpan={3} className="p-4 text-right font-bold text-stone-600">Total Gastos:</td>
+                                <td className="p-4 text-right font-black text-red-700 text-xl whitespace-nowrap">
+                                  $ {filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         )}
                       </div>
+                    </div>
                   </div>
                 )}
 
