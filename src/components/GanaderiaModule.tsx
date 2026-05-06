@@ -95,6 +95,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const handleOpenModal = (herd?: Herd, mode: 'view' | 'edit' = 'view') => {
     setModalMode(mode);
+    setValidationErrors([]);
+    setValidationWarnings([]);
+    setShowValidationErrors(false);
     if (herd) {
       setEditingHerd(herd);
       setFormData({
