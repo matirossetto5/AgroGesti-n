@@ -935,9 +935,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   <button
                     type="submit"
                     form="herd-form"
-                    disabled={isSubmitting || validationErrors.length > 0}
+                    disabled={isSubmitting || (showValidationErrors && validationErrors.length > 0)}
                     className={`px-10 py-2.5 font-bold rounded-xl transition-all ${
-                      validationErrors.length > 0
+                      showValidationErrors && validationErrors.length > 0
                         ? 'bg-stone-300 text-stone-500 cursor-not-allowed'
                         : 'bg-emerald-600 text-white hover:bg-emerald-700'
                     } disabled:opacity-50`}
