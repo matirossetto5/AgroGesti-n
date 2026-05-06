@@ -2,141 +2,117 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError } from '../lib/errorHandlers';
-import { Plus, Edit2, Trash2, Search, Tag, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle } from 'lucide-react';
-
-interface UnifiedEvent {
-  id: string;
-  date: string;
-  type: 'Medicación' | 'Variación de Peso' | 'Control Veterinario' | 'Ración' | 'Otro';
-  description?: string;
-  ingredients?: { type: string; amount: number }[];
-  totalAmount?: number;
-}
-
-interface Animal {
-  id: string;
-  tagNumber: string;
-  category: string;
-  breed: string;
-  weight: number;
-  birthDate: string;
-  status: string;
-  notes: string;
-  batch?: string;
-  events?: UnifiedEvent[];
-}
+import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle } from 'lucide-react';
+import { Herd, HerdEvent, DietIngredient, DietPlan } from '../types';
 
 interface GanaderiaModuleProps {
   farmId: string;
 }
 
-const CATEGORIES = ['Vaca', 'Toro', 'Novillo', 'Vaquillona', 'Ternero', 'Ternera'];
-const BREEDS = ['Angus', 'Hereford', 'Braford', 'Brangus', 'Holando', 'Cruza', 'Otro'];
-const STATUSES = ['Activo', 'Vendido', 'Muerto', 'Enfermo'];
-const EVENT_TYPES = ['Medicación', 'Variación de Peso', 'Control Veterinario', 'Ración', 'Otro'];
-
-const updateCategory = (category: string, weight: number) => {
-  if (weight > 300) {
-    if (category === 'Ternero') return 'Novillo';
-    if (category === 'Ternera') return 'Vaquillona';
-  }
-  return category;
-};
+const SEXES = ['Macho', 'Hembra', 'Mixto'];
+const STATUSES = ['Recría', 'Engorde'];
+const STAGES = ['Iniciación', 'Crecimiento', 'Terminación'];
+const INGREDIENTS = [
+  { name: 'Maíz partido', type: 'Granos' },
+  { name: 'Maíz entero', type: 'Granos' },
+  { name: 'Sorgo', type: 'Granos' },
+  { name: 'Concentrado proteico', type: 'Concentrados' },
+  { name: 'Harina de soja', type: 'Concentrados' },
+  { name: 'Alfalfa molida', type: 'Forrajes' },
+  { name: 'Avena', type: 'Granos' }
+];
+const EVENT_TYPES = ['Medicación', 'Pesaje', 'Dieta', 'Control Veterinario', 'Otro'];
 
 export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
-  const [animals, setAnimals] = useState<Animal[]>([]);
+  const [herds, setHerds] = useState<Herd[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingAnimal, setEditingAnimal] = useState<Animal | null>(null);
+  const [editingHerd, setEditingHerd] = useState<Herd | null>(null);
   const [modalMode, setModalMode] = useState<'view' | 'edit'>('view');
-  const [modalTab, setModalTab] = useState<'details' | 'history'>('details');
+  const [modalTab, setModalTab] = useState<'details' | 'diet' | 'history'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedAnimals, setSelectedAnimals] = useState<string[]>([]);
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
-  const [isBatchCreateModalOpen, setIsBatchCreateModalOpen] = useState(false);
-  const [batchAnimals, setBatchAnimals] = useState<Partial<Animal>[]>([]);
-  const [batchActionType, setBatchActionType] = useState<'rations' | 'pesajes' | 'medicacion' | null>(null);
-  const [selectedBatch, setSelectedBatch] = useState<string>('');
-  const [batchActionInputs, setBatchActionInputs] = useState<Record<string, any>>({});
-  const [selectedAnimalsForAction, setSelectedAnimalsForAction] = useState<Animal[]>([]);
-  const [isConfirmationStep, setIsConfirmationStep] = useState(false);
-  const INGREDIENTS = ['Maíz partido', 'Maíz entero', 'Sorgo', 'Maíz picado', 'Concentrado proteico'];
-  
+  const [selectedHerds, setSelectedHerds] = useState<string[]>([]);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+  const [herdToDelete, setHerdToDelete] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
-    tagNumber: '',
-    category: 'Vaca',
-    breed: 'Angus',
-    weight: '',
-    birthDate: '',
-    status: 'Activo',
+    name: '',
+    sex: 'Macho' as 'Macho' | 'Hembra' | 'Mixto',
+    quantity: '',
+    weightPerAnimal: '',
+    status: 'Recría' as 'Recría' | 'Engorde',
+    stage: 'Iniciación' as 'Iniciación' | 'Crecimiento' | 'Terminación',
     notes: '',
-    batch: '',
-    events: [] as UnifiedEvent[]
+    events: [] as HerdEvent[]
+  });
+
+  const [dietForm, setDietForm] = useState({
+    name: '',
+    ingredients: [] as DietIngredient[]
   });
 
   const [newEvent, setNewEvent] = useState({
     date: new Date().toISOString().split('T')[0],
-    type: 'Medicación',
+    type: 'Medicación' as HerdEvent['type'],
     description: ''
-  });
-
-  const [newRation, setNewRation] = useState({
-    date: new Date().toISOString().split('T')[0],
-    type: 'Maíz',
-    amount: 0
   });
 
   useEffect(() => {
     if (!farmId) return;
 
-    const animalsRef = collection(db, `farms/${farmId}/animals`);
-    const q = query(animalsRef, orderBy('tagNumber', 'asc'));
+    const herdsRef = collection(db, `farms/${farmId}/herds`);
+    const q = query(herdsRef, orderBy('name', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const animalsData = snapshot.docs.map(doc => ({
+      const herdsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
-      })) as Animal[];
-      setAnimals(animalsData);
+      })) as Herd[];
+      setHerds(herdsData);
       setIsLoading(false);
     }, (error) => {
-      console.error("Error fetching animals:", error?.message || error);
+      console.error("Error fetching herds:", error?.message || error);
       setIsLoading(false);
     });
 
     return () => unsubscribe();
   }, [farmId]);
 
-  const handleOpenModal = (animal?: Animal, mode: 'view' | 'edit' = 'view') => {
+  const handleOpenModal = (herd?: Herd, mode: 'view' | 'edit' = 'view') => {
     setModalMode(mode);
-    if (animal) {
-      setEditingAnimal(animal);
+    if (herd) {
+      setEditingHerd(herd);
       setFormData({
-        tagNumber: animal.tagNumber,
-        category: animal.category,
-        breed: animal.breed,
-        weight: animal.weight.toString(),
-        birthDate: animal.birthDate,
-        status: animal.status,
-        notes: animal.notes || '',
-        batch: animal.batch || '',
-        events: animal.events || []
+        name: herd.name,
+        sex: herd.sex,
+        quantity: herd.quantity.toString(),
+        weightPerAnimal: herd.weightPerAnimal.toString(),
+        status: herd.status,
+        stage: herd.stage || 'Iniciación',
+        notes: herd.notes || '',
+        events: herd.events || []
       });
+      if (herd.feedingPlan) {
+        setDietForm({
+          name: herd.feedingPlan.name,
+          ingredients: herd.feedingPlan.ingredients
+        });
+      }
       setModalTab('details');
     } else {
-      setEditingAnimal(null);
+      setEditingHerd(null);
       setFormData({
-        tagNumber: '',
-        category: 'Vaca',
-        breed: 'Angus',
-        weight: '',
-        birthDate: new Date().toISOString().split('T')[0],
-        status: 'Activo',
+        name: '',
+        sex: 'Macho',
+        quantity: '',
+        weightPerAnimal: '',
+        status: 'Recría',
+        stage: 'Iniciación',
         notes: '',
-        batch: '',
         events: []
       });
+      setDietForm({ name: '', ingredients: [] });
       setModalTab('details');
     }
     setIsModalOpen(true);
@@ -144,15 +120,23 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
-    setEditingAnimal(null);
+    setEditingHerd(null);
+  };
+
+  const calculateTotalWeight = (qty: number, weight: number) => qty * weight;
+
+  const calculateDietCosts = (ingredients: DietIngredient[]) => {
+    const totalKg = ingredients.reduce((sum, ing) => sum + ing.kg, 0);
+    const totalPrice = ingredients.reduce((sum, ing) => sum + (ing.kg * ing.pricePerKg), 0);
+    return { totalKg, totalPrice };
   };
 
   const handleAddEvent = () => {
     if (!newEvent.description) return;
-    const event: UnifiedEvent = {
+    const event: HerdEvent = {
       id: Date.now().toString(),
       ...newEvent,
-      type: newEvent.type as UnifiedEvent['type']
+      type: newEvent.type as HerdEvent['type']
     };
     setFormData(prev => ({ ...prev, events: [event, ...prev.events] }));
     setNewEvent({
@@ -166,96 +150,111 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     setFormData(prev => ({ ...prev, events: prev.events.filter(e => e.id !== eventId) }));
   };
 
+  const handleAddDietIngredient = () => {
+    setDietForm(prev => ({
+      ...prev,
+      ingredients: [...prev.ingredients, { type: '', kg: 0, pricePerKg: 0, totalPrice: 0 }]
+    }));
+  };
+
+  const handleRemoveDietIngredient = (index: number) => {
+    setDietForm(prev => ({
+      ...prev,
+      ingredients: prev.ingredients.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleUpdateDietIngredient = (index: number, field: keyof DietIngredient, value: any) => {
+    setDietForm(prev => {
+      const newIngredients = [...prev.ingredients];
+      const ingredient = newIngredients[index];
+      if (field === 'kg' || field === 'pricePerKg') {
+        ingredient[field] = Number(value);
+        ingredient.totalPrice = ingredient.kg * ingredient.pricePerKg;
+      } else {
+        ingredient[field] = value;
+      }
+      newIngredients[index] = ingredient;
+      return { ...prev, ingredients: newIngredients };
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalMode === 'view') return;
-    
-    const animalData = {
-      tagNumber: formData.tagNumber,
-      category: updateCategory(formData.category, Number(formData.weight) || 0),
-      breed: formData.breed,
-      weight: Number(formData.weight) || 0,
-      birthDate: formData.birthDate,
+
+    const qty = Number(formData.quantity) || 0;
+    const weightPer = Number(formData.weightPerAnimal) || 0;
+    const totalWeight = calculateTotalWeight(qty, weightPer);
+
+    const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
+
+    const herdData = {
+      name: formData.name,
+      sex: formData.sex,
+      quantity: qty,
+      weightPerAnimal: weightPer,
+      totalWeight,
       status: formData.status,
+      stage: formData.stage,
       notes: formData.notes,
-      batch: formData.batch,
       events: formData.events,
+      feedingPlan: formData.status === 'Engorde' && dietForm.ingredients.length > 0 ? {
+        id: editingHerd?.feedingPlan?.id || Date.now().toString(),
+        herdId: editingHerd?.id || '',
+        name: dietForm.name,
+        ingredients: dietForm.ingredients,
+        totalKgPerDay: totalKg,
+        totalCostPerDay: totalPrice,
+        createdAt: editingHerd?.feedingPlan?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } : undefined,
       updatedAt: new Date().toISOString()
     };
 
     try {
-      if (editingAnimal) {
-        await updateDoc(doc(db, `farms/${farmId}/animals`, editingAnimal.id), animalData);
+      if (editingHerd) {
+        await updateDoc(doc(db, `farms/${farmId}/herds`, editingHerd.id), herdData);
       } else {
-        await addDoc(collection(db, `farms/${farmId}/animals`), {
-          ...animalData,
+        await addDoc(collection(db, `farms/${farmId}/herds`), {
+          ...herdData,
           createdAt: new Date().toISOString()
         });
       }
       handleCloseModal();
     } catch (error) {
-       handleFirestoreError(error, editingAnimal ? 'update' : 'create', `farms/${farmId}/animals`, auth);
+      handleFirestoreError(error, editingHerd ? 'update' : 'create', `farms/${farmId}/herds`, auth);
     } finally {
-       setIsSubmitting(false);
+      setIsSubmitting(false);
     }
-  };
-
-  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
-  const [isConfirmBatchDeleteOpen, setIsConfirmBatchDeleteOpen] = useState(false);
-  const [animalToDelete, setAnimalToDelete] = useState<string | null>(null);
-
-  const handleDelete = async (id: string) => {
-    setAnimalToDelete(id);
-    setIsConfirmDeleteOpen(true);
   };
 
   const confirmDelete = async () => {
-    if (!animalToDelete) return;
+    if (!herdToDelete) return;
     setIsSubmitting(true);
     try {
-      await deleteDoc(doc(db, `farms/${farmId}/animals`, animalToDelete));
+      await deleteDoc(doc(db, `farms/${farmId}/herds`, herdToDelete));
       setIsConfirmDeleteOpen(false);
-      setAnimalToDelete(null);
+      setHerdToDelete(null);
     } catch (error) {
-      handleFirestoreError(error, 'delete', `farms/${farmId}/animals/${animalToDelete}`, auth);
+      handleFirestoreError(error, 'delete', `farms/${farmId}/herds/${herdToDelete}`, auth);
       setIsConfirmDeleteOpen(false);
-      setAnimalToDelete(null);
+      setHerdToDelete(null);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const confirmBatchDelete = async () => {
-    if (selectedAnimals.length === 0) return;
-    setIsSubmitting(true);
-    try {
-      const batch = writeBatch(db);
-      selectedAnimals.forEach(id => {
-        batch.delete(doc(db, `farms/${farmId}/animals`, id));
-      });
-      await batch.commit();
-      setSelectedAnimals([]);
-      setIsConfirmBatchDeleteOpen(false);
-    } catch (error) {
-      handleFirestoreError(error, 'write', `farms/${farmId}/animals`, auth);
-      setIsConfirmBatchDeleteOpen(false);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const filteredAnimals = animals.filter(a => {
+  const filteredHerds = herds.filter(h => {
     const sTerm = (searchTerm || '').toLowerCase();
-    return (a.tagNumber || '').toLowerCase().includes(sTerm) ||
-           (a.category || '').toLowerCase().includes(sTerm) ||
-           (a.breed || '').toLowerCase().includes(sTerm) ||
-           (a.batch && a.batch.toLowerCase().includes(sTerm));
+    return (h.name || '').toLowerCase().includes(sTerm) ||
+           (h.sex || '').toLowerCase().includes(sTerm) ||
+           (h.status || '').toLowerCase().includes(sTerm);
   });
 
-  // Stats
-  const totalAnimals = animals.filter(a => a.status === 'Activo').length;
-  const totalWeight = animals.filter(a => a.status === 'Activo').reduce((sum, a) => sum + (a.weight || 0), 0);
-  const avgWeight = totalAnimals > 0 ? Math.round(totalWeight / totalAnimals) : 0;
+  const totalAnimals = herds.reduce((sum, h) => sum + (h.quantity || 0), 0);
+  const totalWeight = herds.reduce((sum, h) => sum + (h.totalWeight || 0), 0);
+  const engordoHerds = herds.filter(h => h.status === 'Engorde').length;
 
   if (isLoading) {
     return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div></div>;
@@ -264,14 +263,14 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
           <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl">
-            <Tag className="w-7 h-7" />
+            <Activity className="w-7 h-7" />
           </div>
           <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Activos</p>
-            <p className="text-3xl font-bold text-stone-900">{totalAnimals}</p>
+            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Rodeos</p>
+            <p className="text-3xl font-bold text-stone-900">{herds.length}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
@@ -279,19 +278,26 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             <Scale className="w-7 h-7" />
           </div>
           <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Peso Promedio</p>
-            <p className="text-3xl font-bold text-stone-900">{avgWeight} kg</p>
+            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Animales</p>
+            <p className="text-3xl font-bold text-stone-900">{totalAnimals}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
           <div className="p-4 bg-amber-50 text-amber-600 rounded-2xl">
-            <Activity className="w-7 h-7" />
+            <TrendingUp className="w-7 h-7" />
           </div>
           <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Categorías</p>
-            <p className="text-3xl font-bold text-stone-900">
-              {new Set(animals.filter(a => a.status === 'Activo').map(a => a.category)).size}
-            </p>
+            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Peso Total (kg)</p>
+            <p className="text-3xl font-bold text-stone-900">{totalWeight.toLocaleString()}</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
+          <div className="p-4 bg-purple-50 text-purple-600 rounded-2xl">
+            <Syringe className="w-7 h-7" />
+          </div>
+          <div>
+            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">En Engorde</p>
+            <p className="text-3xl font-bold text-stone-900">{engordoHerds}</p>
           </div>
         </div>
       </div>
@@ -302,7 +308,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <input
             type="text"
-            placeholder="Buscar por caravana, lote, categoría o raza..."
+            placeholder="Buscar rodeo por nombre, sexo o estado..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
@@ -313,232 +319,22 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
         >
           <Plus className="w-5 h-5" />
-          <span>Nuevo Animal</span>
-        </button>
-        <button
-          onClick={() => setIsBatchCreateModalOpen(true)}
-          className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Nuevo Lote</span>
-        </button>
-        <button
-          onClick={() => { setBatchActionType('rations'); setIsBatchModalOpen(true); }}
-          className="flex items-center space-x-2 bg-stone-600 hover:bg-stone-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <Scale className="w-5 h-5" />
-          <span>Raciones</span>
-        </button>
-        <button
-          onClick={() => { setBatchActionType('pesajes'); setIsBatchModalOpen(true); }}
-          className="flex items-center space-x-2 bg-stone-600 hover:bg-stone-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <TrendingUp className="w-5 h-5" />
-          <span>Pesajes</span>
-        </button>
-        <button
-          onClick={() => { setBatchActionType('medicacion'); setIsBatchModalOpen(true); }}
-          className="flex items-center space-x-2 bg-stone-600 hover:bg-stone-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <Syringe className="w-5 h-5" />
-          <span>Medicación</span>
+          <span>Nuevo Rodeo</span>
         </button>
       </div>
 
-      {selectedAnimals.length > 0 && (
+      {selectedHerds.length > 0 && (
         <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl flex items-center justify-between shadow-sm">
           <span className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
-            {selectedAnimals.length} animales seleccionados
+            {selectedHerds.length} rodeos seleccionados
           </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setIsConfirmBatchDeleteOpen(true)}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
-            >
-              Eliminar seleccionados
-            </button>
-            <button
-              onClick={() => setSelectedAnimals([])}
-              className="bg-stone-200 hover:bg-stone-300 text-stone-700 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
-            >
-              Deshacer
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isBatchModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-stone-800 mb-4 capitalize">
-              Registrar {batchActionType === 'rations' ? 'Raciones' : batchActionType === 'pesajes' ? 'Pesajes' : 'Medicación'}
-            </h3>
-            <div className="space-y-4">
-              {!isConfirmationStep ? (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-stone-700 mb-1">Buscar Animal (Caravana/ID)</label>
-                    <input
-                      type="text"
-                      placeholder="Buscar..."
-                      className="w-full p-2 border border-stone-300 rounded-lg"
-                      onChange={e => {
-                        const term = (e.target.value || '').toLowerCase();
-                        const found = animals.find(a => (a.tagNumber || '').toLowerCase().includes(term));
-                        if (found && !selectedAnimalsForAction.find(a => a.id === found.id)) {
-                          setSelectedAnimalsForAction([...selectedAnimalsForAction, found]);
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="max-h-40 overflow-y-auto border rounded-lg p-2">
-                    {selectedAnimalsForAction.map(animal => (
-                      <div key={animal.id} className="flex justify-between items-center p-1 border-b">
-                        <span>{animal.tagNumber}</span>
-                        <button onClick={() => setSelectedAnimalsForAction(selectedAnimalsForAction.filter(a => a.id !== animal.id))} className="text-red-500">X</button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {batchActionType === 'rations' && (
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">Ingredientes</h4>
-                      {INGREDIENTS.map(ing => (
-                        <div key={ing} className="flex items-center gap-2">
-                          <span className="text-sm w-40">{ing}</span>
-                          <input type="number" placeholder="kg" className="p-1 border rounded w-20" onChange={e => setBatchActionInputs(prev => ({ ...prev, [ing]: Number(e.target.value) }))} />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {(batchActionType === 'pesajes' || batchActionType === 'medicacion') && (
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">{batchActionType === 'pesajes' ? 'Pesos' : 'Medicamentos'}</h4>
-                      {selectedAnimalsForAction.map(animal => (
-                        <div key={animal.id} className="flex items-center gap-2">
-                          <span className="text-sm w-20">{animal.tagNumber}</span>
-                          <input type={batchActionType === 'pesajes' ? 'number' : 'text'} placeholder={batchActionType === 'pesajes' ? 'kg' : 'Descripción'} className="p-1 border rounded flex-1" onChange={e => setBatchActionInputs(prev => ({ ...prev, [animal.id]: batchActionType === 'pesajes' ? Number(e.target.value) : e.target.value }))} />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button onClick={() => { setIsBatchModalOpen(false); setBatchActionInputs({}); setSelectedAnimalsForAction([]); }} className="flex-1 bg-stone-200 text-stone-800 py-2 rounded-lg">Cancelar</button>
-                    <button onClick={() => setIsConfirmationStep(true)} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg">Siguiente</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="p-4 bg-stone-50 rounded-lg">
-                    <h4 className="font-medium mb-2">Resumen</h4>
-                    <pre className="text-xs overflow-x-auto">{JSON.stringify({ animals: selectedAnimalsForAction.map(a => a.tagNumber), inputs: batchActionInputs }, null, 2)}</pre>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setIsConfirmationStep(false)} className="flex-1 bg-stone-200 text-stone-800 py-2 rounded-lg">Atrás</button>
-                    <button
-                      onClick={async () => {
-                        if (isSubmitting) return;
-                        setIsSubmitting(true);
-                        const batch = writeBatch(db);
-                        selectedAnimalsForAction.forEach(animal => {
-                          const animalRef = doc(db, `farms/${farmId}/animals`, animal.id);
-                          if (batchActionType === 'rations') {
-                            const ingredients = Object.entries(batchActionInputs).filter(([_, amount]) => (amount as number) > 0).map(([type, amount]) => ({ type, amount: amount as number }));
-                            const totalAmount = ingredients.reduce((sum, ing) => sum + ing.amount, 0);
-                            if (ingredients.length > 0) {
-                              batch.update(animalRef, { events: [...(animal.events || []), { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], type: 'Ración', ingredients, totalAmount }] });
-                            }
-                          } else if (batchActionType === 'medicacion') {
-                            const description = batchActionInputs[animal.id];
-                            if (description) {
-                              batch.update(animalRef, { events: [...(animal.events || []), { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], type: 'Medicación', description }] });
-                            }
-                          } else if (batchActionType === 'pesajes') {
-                            const weight = batchActionInputs[animal.id];
-                            if (weight) {
-                              batch.update(animalRef, { 
-                                weight,
-                                category: updateCategory(animal.category, weight),
-                                events: [...(animal.events || []), { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], type: 'Variación de Peso', description: `Nuevo peso: ${weight} kg` }] 
-                              });
-                            }
-                          }
-                        });
-                        await batch.commit();
-                        setIsSubmitting(false);
-                        setIsBatchModalOpen(false);
-                        setBatchActionInputs({});
-                        setSelectedAnimalsForAction([]);
-                        setIsConfirmationStep(false);
-                      }}
-                      disabled={isSubmitting}
-                      className={`flex-1 text-white py-2 rounded-lg ${isSubmitting ? 'bg-emerald-400' : 'bg-emerald-600'}`}
-                    >
-                      {isSubmitting ? 'Registrando...' : 'Confirmar Registro'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isBatchCreateModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-stone-800 mb-4">Registrar Nuevo Lote</h3>
-            <div className="space-y-4">
-              <input type="text" placeholder="Nombre del Lote/Rodeo/Jaula" className="w-full p-2 border border-stone-300 rounded-lg" id="batch-name" />
-              <div className="border-t pt-4">
-                <h4 className="font-medium mb-2">Animales</h4>
-                {batchAnimals.map((animal, index) => (
-                  <div key={index} className="grid grid-cols-6 gap-2 mb-2 p-2 bg-stone-50 rounded-lg">
-                    <input type="text" placeholder="Caravana" className="p-1 border rounded" value={animal.tagNumber || ''} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].tagNumber = e.target.value; setBatchAnimals(newAnimals); }} />
-                    <select className="p-1 border rounded" value={animal.category || 'Ternero'} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].category = e.target.value; setBatchAnimals(newAnimals); }}>
-                      {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                    </select>
-                    <select className="p-1 border rounded" value={animal.breed || 'Angus'} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].breed = e.target.value; setBatchAnimals(newAnimals); }}>
-                      {BREEDS.map(breed => <option key={breed} value={breed}>{breed}</option>)}
-                    </select>
-                    <input type="number" placeholder="Peso" className="p-1 border rounded" value={animal.weight || ''} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].weight = Number(e.target.value); setBatchAnimals(newAnimals); }} />
-                    <input type="date" className="p-1 border rounded" value={animal.birthDate || ''} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].birthDate = e.target.value; setBatchAnimals(newAnimals); }} />
-                    <select className="p-1 border rounded" value={animal.status || 'Activo'} onChange={e => { const newAnimals = [...batchAnimals]; newAnimals[index].status = e.target.value; setBatchAnimals(newAnimals); }}>
-                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                ))}
-                <button onClick={() => setBatchAnimals([...batchAnimals, { tagNumber: '', category: 'Ternero', breed: 'Angus', weight: 0, birthDate: new Date().toISOString().split('T')[0], status: 'Activo' }])} className="text-emerald-600 font-medium text-sm">+ Agregar Animal</button>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setIsBatchCreateModalOpen(false); setBatchAnimals([]); }} className="flex-1 bg-stone-200 text-stone-800 py-2 rounded-lg">Cancelar</button>
-                <button
-                  onClick={async () => {
-                    const batchName = (document.getElementById('batch-name') as HTMLInputElement).value;
-                    if (!batchName || batchAnimals.length === 0) return;
-                    
-                    const batch = writeBatch(db);
-                    batchAnimals.forEach(animal => {
-                      const animalRef = doc(collection(db, `farms/${farmId}/animals`));
-                      batch.set(animalRef, {
-                        ...animal,
-                        category: updateCategory(animal.category || 'Ternero', animal.weight || 0),
-                        batch: batchName,
-                        createdAt: new Date().toISOString()
-                      });
-                    });
-                    await batch.commit();
-                    setIsBatchCreateModalOpen(false);
-                    setBatchAnimals([]);
-                  }}
-                  className="flex-1 bg-emerald-600 text-white py-2 rounded-lg"
-                >
-                  Registrar Lote
-                </button>
-              </div>
-            </div>
-          </div>
+          <button
+            onClick={() => setSelectedHerds([])}
+            className="bg-stone-200 hover:bg-stone-300 text-stone-700 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
+          >
+            Deshacer
+          </button>
         </div>
       )}
 
@@ -551,78 +347,82 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 <th className="p-4">
                   <input
                     type="checkbox"
-                    checked={selectedAnimals.length === filteredAnimals.length && filteredAnimals.length > 0}
+                    checked={selectedHerds.length === filteredHerds.length && filteredHerds.length > 0}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedAnimals(filteredAnimals.map(a => a.id));
+                        setSelectedHerds(filteredHerds.map(h => h.id));
                       } else {
-                        setSelectedAnimals([]);
+                        setSelectedHerds([]);
                       }
                     }}
                   />
                 </th>
-                <th className="p-4 font-medium">Caravana</th>
-                <th className="p-4 font-medium">Lote / Jaula</th>
-                <th className="p-4 font-medium">Categoría</th>
-                <th className="p-4 font-medium">Raza</th>
-                <th className="p-4 font-medium">Peso (kg)</th>
+                <th className="p-4 font-medium">Nombre</th>
+                <th className="p-4 font-medium">Sexo</th>
+                <th className="p-4 font-medium">Cantidad</th>
+                <th className="p-4 font-medium">Peso/Animal (kg)</th>
+                <th className="p-4 font-medium">Peso Total (kg)</th>
                 <th className="p-4 font-medium">Estado</th>
+                <th className="p-4 font-medium">Etapa</th>
                 <th className="p-4 font-medium text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200">
-              {filteredAnimals.length === 0 ? (
+              {filteredHerds.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-stone-500">
-                    No se encontraron animales.
+                  <td colSpan={9} className="p-8 text-center text-stone-500">
+                    No se encontraron rodeos.
                   </td>
                 </tr>
               ) : (
-                filteredAnimals.map((animal) => (
-                  <tr key={animal.id} className="hover:bg-stone-50 transition-colors">
+                filteredHerds.map((herd) => (
+                  <tr key={herd.id} className="hover:bg-stone-50 transition-colors">
                     <td className="p-4">
                       <input
                         type="checkbox"
-                        checked={selectedAnimals.includes(animal.id)}
+                        checked={selectedHerds.includes(herd.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setSelectedAnimals([...selectedAnimals, animal.id]);
+                            setSelectedHerds([...selectedHerds, herd.id]);
                           } else {
-                            setSelectedAnimals(selectedAnimals.filter(id => id !== animal.id));
+                            setSelectedHerds(selectedHerds.filter(id => id !== herd.id));
                           }
                         }}
                       />
                     </td>
-                    <td className="p-4 font-medium text-stone-800">{animal.tagNumber}</td>
-                    <td className="p-4 text-stone-600">{animal.batch || '-'}</td>
-                    <td className="p-4 text-stone-600">{animal.category}</td>
-                    <td className="p-4 text-stone-600">{animal.breed}</td>
-                    <td className="p-4 text-stone-600">{animal.weight}</td>
+                    <td className="p-4 font-medium text-stone-800">{herd.name}</td>
+                    <td className="p-4 text-stone-600">{herd.sex}</td>
+                    <td className="p-4 text-stone-600">{herd.quantity}</td>
+                    <td className="p-4 text-stone-600">{herd.weightPerAnimal}</td>
+                    <td className="p-4 text-stone-600 font-medium">{herd.totalWeight.toLocaleString()}</td>
                     <td className="p-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                        ${animal.status === 'Activo' ? 'bg-emerald-100 text-emerald-800' : 
-                          animal.status === 'Vendido' ? 'bg-blue-100 text-blue-800' : 
-                          'bg-red-100 text-red-800'}`}>
-                        {animal.status}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        herd.status === 'Recría' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
+                      }`}>
+                        {herd.status}
                       </span>
                     </td>
+                    <td className="p-4 text-stone-600">{herd.stage || '-'}</td>
                     <td className="p-4 text-right space-x-2">
                       <button
-                        onClick={() => handleOpenModal(animal, 'view')}
+                        onClick={() => handleOpenModal(herd, 'view')}
                         className="p-2 text-stone-400 hover:text-emerald-600 transition-colors"
-                        title="Ver Ficha"
+                        title="Ver"
                       >
                         <Activity className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleOpenModal(animal, 'edit')}
+                        onClick={() => handleOpenModal(herd, 'edit')}
                         className="p-2 text-stone-400 hover:text-emerald-600 transition-colors"
                         title="Editar"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(animal.id)}
+                        onClick={() => {
+                          setHerdToDelete(herd.id);
+                          setIsConfirmDeleteOpen(true);
+                        }}
                         className="p-2 text-stone-400 hover:text-red-600 transition-colors"
                         title="Eliminar"
                       >
@@ -645,18 +445,18 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
-                  <Tag className="w-5 h-5" />
+                  <Activity className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-stone-900">
-                    {editingAnimal ? `Animal: ${editingAnimal.tagNumber}` : 'Nuevo Animal'}
+                    {editingHerd ? `Rodeo: ${editingHerd.name}` : 'Nuevo Rodeo'}
                   </h3>
                   <p className="text-sm text-stone-500">
-                    {modalMode === 'view' ? 'Ficha técnica' : 'Edición de perfil'}
+                    {modalMode === 'view' ? 'Visualización' : 'Edición'}
                   </p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={handleCloseModal}
                 className="p-2 hover:bg-stone-200 rounded-full transition-colors"
               >
@@ -674,69 +474,71 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               >
                 Detalles
               </button>
+              {formData.status === 'Engorde' && (
+                <button
+                  onClick={() => setModalTab('diet')}
+                  className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
+                    modalTab === 'diet' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
+                  }`}
+                >
+                  Dieta
+                </button>
+              )}
               <button
                 onClick={() => setModalTab('history')}
                 className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
                   modalTab === 'history' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
                 }`}
               >
-                Historial de Eventos
+                Historial
               </button>
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 bg-white">
               {modalTab === 'details' ? (
-                <form id="animal-form" onSubmit={handleSubmit}>
+                <form id="herd-form" onSubmit={handleSubmit}>
                   <fieldset disabled={modalMode === 'view'} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Número de Caravana</label>
+                      <label className="text-sm font-bold text-stone-700">Nombre del Rodeo</label>
                       <input
                         type="text"
                         required
-                        value={formData.tagNumber}
-                        onChange={(e) => setFormData({ ...formData, tagNumber: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50 disabled:text-stone-500"
-                        placeholder="Ej: AB-123"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
+                        placeholder="Ej: Rodeo A"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Categoría</label>
+                      <label className="text-sm font-bold text-stone-700">Sexo</label>
                       <select
-                        value={formData.category}
-                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                        value={formData.sex}
+                        onChange={(e) => setFormData({ ...formData, sex: e.target.value as any })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
                       >
-                        {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                        {SEXES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Raza</label>
-                      <select
-                        value={formData.breed}
-                        onChange={(e) => setFormData({ ...formData, breed: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
-                      >
-                        {BREEDS.map(breed => <option key={breed} value={breed}>{breed}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Peso Actual (kg)</label>
+                      <label className="text-sm font-bold text-stone-700">Cantidad de Animales</label>
                       <input
                         type="number"
                         required
-                        value={formData.weight}
-                        onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                        min="1"
+                        value={formData.quantity}
+                        onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Fecha de Nacimiento / Ingreso</label>
+                      <label className="text-sm font-bold text-stone-700">Peso por Animal (kg)</label>
                       <input
-                        type="date"
+                        type="number"
                         required
-                        value={formData.birthDate}
-                        onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                        min="1"
+                        value={formData.weightPerAnimal}
+                        onChange={(e) => setFormData({ ...formData, weightPerAnimal: e.target.value })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
                       />
                     </div>
@@ -744,67 +546,178 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       <label className="text-sm font-bold text-stone-700">Estado</label>
                       <select
                         value={formData.status}
-                        onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                        onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
                       >
                         {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Lote / Rodeo / Jaula</label>
-                      <input
-                        type="text"
-                        value={formData.batch}
-                        onChange={(e) => setFormData({ ...formData, batch: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
-                        placeholder="Ej: Lote 1"
-                      />
-                    </div>
+                    {formData.status === 'Engorde' && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-stone-700">Etapa</label>
+                        <select
+                          value={formData.stage}
+                          onChange={(e) => setFormData({ ...formData, stage: e.target.value as any })}
+                          className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
+                        >
+                          {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-bold text-stone-700">Notas / Observaciones</label>
+                      <label className="text-sm font-bold text-stone-700">Notas</label>
                       <textarea
                         value={formData.notes}
                         onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none transition-all disabled:bg-stone-50"
-                        placeholder="Información adicional relevante..."
+                        placeholder="Información adicional..."
                       />
                     </div>
+                    {!modalMode && (
+                      <div className="md:col-span-2 p-4 bg-stone-50 rounded-xl">
+                        <p className="text-sm text-stone-600">
+                          <strong>Peso Total:</strong> {calculateTotalWeight(Number(formData.quantity) || 0, Number(formData.weightPerAnimal) || 0).toLocaleString()} kg
+                        </p>
+                      </div>
+                    )}
                   </fieldset>
                 </form>
+              ) : modalTab === 'diet' ? (
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-bold text-stone-700">Nombre de la Dieta</label>
+                      <input
+                        type="text"
+                        disabled={modalMode === 'view'}
+                        value={dietForm.name}
+                        onChange={(e) => setDietForm({ ...dietForm, name: e.target.value })}
+                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-stone-50"
+                        placeholder="Ej: Dieta Terminación"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-bold text-stone-800">Insumos</h4>
+                        {modalMode === 'edit' && (
+                          <button
+                            type="button"
+                            onClick={handleAddDietIngredient}
+                            className="text-emerald-600 hover:text-emerald-700 font-medium text-sm"
+                          >
+                            + Agregar Insumo
+                          </button>
+                        )}
+                      </div>
+
+                      {dietForm.ingredients.length === 0 ? (
+                        <p className="text-stone-400 text-sm">Sin insumos registrados</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {dietForm.ingredients.map((ing, idx) => (
+                            <div key={idx} className="grid grid-cols-4 gap-2 p-3 bg-stone-50 rounded-lg">
+                              <input
+                                type="text"
+                                disabled={modalMode === 'view'}
+                                list="ingredients-list"
+                                value={ing.type}
+                                onChange={(e) => handleUpdateDietIngredient(idx, 'type', e.target.value)}
+                                placeholder="Tipo"
+                                className="p-2 border rounded disabled:bg-stone-100"
+                              />
+                              <input
+                                type="number"
+                                disabled={modalMode === 'view'}
+                                value={ing.kg}
+                                onChange={(e) => handleUpdateDietIngredient(idx, 'kg', e.target.value)}
+                                placeholder="kg"
+                                min="0"
+                                step="0.1"
+                                className="p-2 border rounded disabled:bg-stone-100"
+                              />
+                              <input
+                                type="number"
+                                disabled={modalMode === 'view'}
+                                value={ing.pricePerKg}
+                                onChange={(e) => handleUpdateDietIngredient(idx, 'pricePerKg', e.target.value)}
+                                placeholder="Precio/kg"
+                                min="0"
+                                step="0.01"
+                                className="p-2 border rounded disabled:bg-stone-100"
+                              />
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-bold text-stone-700">${ing.totalPrice.toFixed(2)}</span>
+                                {modalMode === 'edit' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveDietIngredient(idx)}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {dietForm.ingredients.length > 0 && (
+                        <div className="mt-4 p-4 bg-emerald-50 rounded-lg border border-emerald-100">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-xs text-stone-600 uppercase font-bold">Total kg/día</p>
+                              <p className="text-2xl font-bold text-emerald-700">
+                                {calculateDietCosts(dietForm.ingredients).totalKg.toFixed(2)} kg
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-stone-600 uppercase font-bold">Costo/día</p>
+                              <p className="text-2xl font-bold text-emerald-700">
+                                ${calculateDietCosts(dietForm.ingredients).totalPrice.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-6">
                   {modalMode === 'edit' && (
-                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
+                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
                       <h4 className="text-sm font-bold text-emerald-800 mb-3 uppercase tracking-wider flex items-center gap-2">
                         <Plus className="w-4 h-4" />
-                        Registrar Nuevo Evento
+                        Registrar Evento
                       </h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <input
                           type="date"
                           value={newEvent.date}
                           onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
-                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                         <select
                           value={newEvent.type}
-                          onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as UnifiedEvent['type'] })}
-                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium"
+                          onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as any })}
+                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                           {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            placeholder="Descripción del evento..."
+                            placeholder="Descripción..."
                             value={newEvent.description}
                             onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                            className="flex-1 p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                            className="flex-1 p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
                           />
                           <button
                             type="button"
                             onClick={handleAddEvent}
-                            className="bg-emerald-600 text-white p-2.5 rounded-xl hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100"
+                            className="bg-emerald-600 text-white p-2.5 rounded-xl hover:bg-emerald-700"
                           >
                             <Plus className="w-5 h-5" />
                           </button>
@@ -816,52 +729,30 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   <div className="space-y-4">
                     <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
                       <History className="w-4 h-4" />
-                      Línea de Tiempo
+                      Eventos Registrados
                     </h4>
                     {formData.events.length === 0 ? (
                       <div className="text-center py-12 text-stone-400 border-2 border-dashed border-stone-100 rounded-2xl">
                         <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p className="font-medium">No hay eventos registrados para este animal</p>
+                        <p className="font-medium">Sin eventos</p>
                       </div>
                     ) : (
-                      <div className="relative border-l-2 border-stone-100 ml-3 space-y-6">
-                        {formData.events.sort((a,b) => b.date.localeCompare(a.date)).map((event) => (
-                          <div key={event.id} className="relative pl-6">
-                            <div className="absolute left-[-9px] top-1 w-4 h-4 rounded-full bg-emerald-500 border-4 border-white shadow-sm ring-1 ring-emerald-500/20"></div>
-                            <div className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm relative group hover:border-emerald-200 transition-colors">
-                              <div className="flex justify-between items-start mb-1">
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest leading-none bg-stone-50 px-2 py-1 rounded">
-                                  {event.date}
-                                </span>
-                                {modalMode === 'edit' && (
-                                  <button
-                                    onClick={() => handleRemoveEvent(event.id)}
-                                    className="text-stone-300 hover:text-red-500 transition-colors p-1"
-                                    title="Eliminar evento"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                      <div className="space-y-3">
+                        {formData.events.sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
+                          <div key={event.id} className="p-4 bg-stone-50 rounded-lg border border-stone-100">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <p className="text-xs text-stone-500 uppercase font-bold">{event.date}</p>
+                                <p className="font-bold text-stone-800">{event.type}</p>
+                                <p className="text-sm text-stone-600">{event.description}</p>
                               </div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-bold text-stone-800">{event.type}</span>
-                                {event.totalAmount && (
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                                    {event.totalAmount} kg totales
-                                  </span>
-                                )}
-                              </div>
-                              {event.description && (
-                                <p className="text-sm text-stone-600 leading-relaxed font-medium">"{event.description}"</p>
-                              )}
-                              {event.ingredients && (
-                                <div className="mt-3 flex flex-wrap gap-1.5">
-                                  {event.ingredients.map((ing, i) => (
-                                    <span key={i} className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-100 text-stone-500">
-                                      {ing.type}: {ing.amount} kg
-                                    </span>
-                                  ))}
-                                </div>
+                              {modalMode === 'edit' && (
+                                <button
+                                  onClick={() => handleRemoveEvent(event.id)}
+                                  className="text-red-600 hover:text-red-700 p-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                               )}
                             </div>
                           </div>
@@ -884,11 +775,11 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               {modalMode === 'edit' && (
                 <button
                   type="submit"
-                  form="animal-form"
+                  form="herd-form"
                   disabled={isSubmitting}
-                  className="px-10 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all disabled:opacity-50"
+                  className="px-10 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
+                  {isSubmitting ? 'Guardando...' : 'Guardar'}
                 </button>
               )}
             </div>
@@ -896,27 +787,27 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         </div>
       )}
 
-      {/* Delete Single Confirmation */}
+      {/* Delete Confirmation */}
       {isConfirmDeleteOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
             <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4 mx-auto">
               <Trash2 className="w-6 h-6" />
             </div>
             <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Confirmar eliminación</h3>
             <p className="text-stone-600 mb-6 text-center">
-              ¿Estás seguro de que deseas eliminar este animal? Esta acción eliminará permanentemente todos sus registros.
+              ¿Estás seguro de eliminar este rodeo?
             </p>
             <div className="flex flex-col gap-2">
-              <button 
+              <button
                 onClick={confirmDelete}
-                className="w-full py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-100"
+                className="w-full py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700"
               >
-                Sí, eliminar definitivamente
+                Eliminar
               </button>
-              <button 
-                onClick={() => setIsConfirmDeleteOpen(false)} 
-                className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl transition-all"
+              <button
+                onClick={() => setIsConfirmDeleteOpen(false)}
+                className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl"
               >
                 Cancelar
               </button>
@@ -925,35 +816,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         </div>
       )}
 
-      {/* Delete Batch Confirmation */}
-      {isConfirmBatchDeleteOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 animate-in fade-in zoom-in duration-200">
-            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4 mx-auto">
-              <AlertCircle className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Eliminar Selección</h3>
-            <p className="text-stone-600 mb-6 text-center">
-              Vas a eliminar <strong>{selectedAnimals.length}</strong> animales y todos sus históricos. ¿Deseas continuar?
-            </p>
-            <div className="flex flex-col gap-2">
-              <button 
-                onClick={confirmBatchDelete}
-                disabled={isSubmitting}
-                className="w-full py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-100 disabled:opacity-50"
-              >
-                {isSubmitting ? 'Eliminando...' : 'Eliminar seleccionados'}
-              </button>
-              <button 
-                onClick={() => setIsConfirmBatchDeleteOpen(false)} 
-                className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl transition-all"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <datalist id="ingredients-list">
+        {INGREDIENTS.map(ing => <option key={ing.name} value={ing.name} />)}
+      </datalist>
     </div>
   );
 }
