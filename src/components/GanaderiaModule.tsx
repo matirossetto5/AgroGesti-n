@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError } from '../lib/errorHandlers';
-import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Herd, HerdEvent, DietIngredient, DietPlan } from '../types';
+import { validateHerdForm, validateDietForm, ValidationError } from '../lib/validators';
+import { ValidationMessage, FieldError } from './ValidationMessage';
 
 interface GanaderiaModuleProps {
   farmId: string;
@@ -57,6 +59,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     type: 'Medicación' as HerdEvent['type'],
     description: ''
   });
+
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
 
   useEffect(() => {
     if (!farmId) return;
@@ -121,6 +126,49 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingHerd(null);
+    setValidationErrors([]);
+    setValidationWarnings([]);
+  };
+
+  const validateForm = () => {
+    const result = validateHerdForm({
+      name: formData.name,
+      quantity: formData.quantity,
+      weightPerAnimal: formData.weightPerAnimal,
+      status: formData.status
+    });
+
+    setValidationErrors(result.errors);
+    setValidationWarnings(result.warnings);
+
+    // Validar dieta si es engorde
+    if (formData.status === 'Engorde' && dietForm.ingredients.length > 0) {
+      const dietResult = validateDietForm({
+        ingredients: dietForm.ingredients,
+        quantity: Number(formData.quantity) || 1
+      });
+
+      setValidationErrors(prev => [...prev, ...dietResult.errors]);
+      setValidationWarnings(prev => [...prev, ...dietResult.warnings]);
+    }
+
+    return result.isValid;
+  };
+
+  const handleFormChange = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    // Validar en tiempo real
+    setTimeout(() => {
+      const result = validateHerdForm({
+        name: field === 'name' ? value : formData.name,
+        quantity: field === 'quantity' ? value : formData.quantity,
+        weightPerAnimal: field === 'weightPerAnimal' ? value : formData.weightPerAnimal,
+        status: field === 'status' ? value : formData.status
+      });
+
+      setValidationErrors(result.errors);
+      setValidationWarnings(result.warnings);
+    }, 300);
   };
 
   const calculateTotalWeight = (qty: number, weight: number) => qty * weight;
@@ -182,6 +230,11 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalMode === 'view') return;
+
+    // Validar antes de guardar
+    if (!validateForm()) {
+      return;
+    }
 
     const qty = Number(formData.quantity) || 0;
     const weightPer = Number(formData.weightPerAnimal) || 0;
@@ -498,6 +551,16 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             <div className="flex-1 overflow-y-auto p-6 bg-white">
               {modalTab === 'details' ? (
                 <form id="herd-form" onSubmit={handleSubmit}>
+                  {validationErrors.length > 0 && (
+                    <div className="mb-6">
+                      <ValidationMessage
+                        errors={validationErrors.map(e => ({ message: e.message, type: e.type }))}
+                        warnings={validationWarnings.map(w => ({ message: w.message, type: w.type }))}
+                        compact={true}
+                      />
+                    </div>
+                  )}
+
                   <fieldset disabled={modalMode === 'view'} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-stone-700">Nombre del Rodeo</label>
@@ -505,9 +568,17 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                         type="text"
                         required
                         value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
+                        onChange={(e) => handleFormChange('name', e.target.value)}
+                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
+                          validationErrors.some(e => e.field === 'name')
+                            ? 'border-red-300 focus:ring-red-500'
+                            : 'border-stone-200 focus:ring-emerald-500'
+                        }`}
                         placeholder="Ej: Rodeo A"
+                      />
+                      <FieldError
+                        error={validationErrors.find(e => e.field === 'name')?.message}
+                        warning={validationWarnings.find(w => w.field === 'name')?.message}
                       />
                     </div>
                     <div className="space-y-2">
@@ -527,8 +598,16 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                         required
                         min="1"
                         value={formData.quantity}
-                        onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
+                        onChange={(e) => handleFormChange('quantity', e.target.value)}
+                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
+                          validationErrors.some(e => e.field === 'quantity')
+                            ? 'border-red-300 focus:ring-red-500'
+                            : 'border-stone-200 focus:ring-emerald-500'
+                        }`}
+                      />
+                      <FieldError
+                        error={validationErrors.find(e => e.field === 'quantity')?.message}
+                        warning={validationWarnings.find(w => w.field === 'quantity')?.message}
                       />
                     </div>
                     <div className="space-y-2">
@@ -538,8 +617,16 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                         required
                         min="1"
                         value={formData.weightPerAnimal}
-                        onChange={(e) => setFormData({ ...formData, weightPerAnimal: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
+                        onChange={(e) => handleFormChange('weightPerAnimal', e.target.value)}
+                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
+                          validationErrors.some(e => e.field === 'weightPerAnimal')
+                            ? 'border-red-300 focus:ring-red-500'
+                            : 'border-stone-200 focus:ring-emerald-500'
+                        }`}
+                      />
+                      <FieldError
+                        error={validationErrors.find(e => e.field === 'weightPerAnimal')?.message}
+                        warning={validationWarnings.find(w => w.field === 'weightPerAnimal')?.message}
                       />
                     </div>
                     <div className="space-y-2">
@@ -773,14 +860,26 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 {modalMode === 'view' ? 'Cerrar' : 'Cancelar'}
               </button>
               {modalMode === 'edit' && (
-                <button
-                  type="submit"
-                  form="herd-form"
-                  disabled={isSubmitting}
-                  className="px-10 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Guardando...' : 'Guardar'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {validationErrors.length > 0 && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
+                      <AlertCircle className="w-4 h-4 text-red-600" />
+                      <span className="text-xs font-bold text-red-600">{validationErrors.length} error{validationErrors.length > 1 ? 'es' : ''}</span>
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    form="herd-form"
+                    disabled={isSubmitting || validationErrors.length > 0}
+                    className={`px-10 py-2.5 font-bold rounded-xl transition-all ${
+                      validationErrors.length > 0
+                        ? 'bg-stone-300 text-stone-500 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    } disabled:opacity-50`}
+                  >
+                    {isSubmitting ? 'Guardando...' : 'Guardar'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
