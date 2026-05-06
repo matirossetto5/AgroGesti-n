@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, onSnapshot, addDoc, query, orderBy, deleteDoc, doc, Timestamp 
+import {
+  collection, onSnapshot, addDoc, query, orderBy, deleteDoc, doc, Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError } from '../lib/errorHandlers';
-import { 
-  Sprout, Droplets, Target, Calendar, ClipboardCheck, Trash2, 
-  ChevronRight, Filter, Plus, Activity, Info, TrendingUp, FlaskConical
+import {
+  Sprout, Droplets, Target, Calendar, ClipboardCheck, Trash2,
+  ChevronRight, Filter, Plus, Activity, Info, TrendingUp, FlaskConical, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { agriculturalValidators, ValidationError } from '../lib/validators';
+import { ValidationMessage, FieldError } from './ValidationMessage';
 
 interface AgEvent {
   id: string;
@@ -44,6 +46,10 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
   const [details, setDetails] = useState<any>({});
   const [isActionLoading, setIsActionLoading] = useState(false);
 
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
+
   useEffect(() => {
     if (!farmId) return;
 
@@ -77,10 +83,34 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
     };
   }, [farmId]);
 
+  const validateAgriculturalForm = (): boolean => {
+    setShowValidationErrors(true);
+    const errors: ValidationError[] = [];
+    const warnings: ValidationError[] = [];
+
+    const campaignErrors = agriculturalValidators.campaign(campaign);
+    const yearErrors = agriculturalValidators.year(year);
+    const cropErrors = agriculturalValidators.crop(crop);
+
+    campaignErrors.forEach(e => (e.type === 'error' ? errors : warnings).push(e));
+    yearErrors.forEach(e => (e.type === 'error' ? errors : warnings).push(e));
+    cropErrors.forEach(e => (e.type === 'error' ? errors : warnings).push(e));
+
+    if (eventType === 'cosecha') {
+      const yieldErrors = agriculturalValidators.yield(details.yield || '', crop);
+      yieldErrors.forEach(e => (e.type === 'error' ? errors : warnings).push(e));
+    }
+
+    setValidationErrors(errors);
+    setValidationWarnings(warnings);
+
+    return errors.length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!campaign || !year) {
-      alert('Debes seleccionar una campaña y año');
+
+    if (!validateAgriculturalForm()) {
       return;
     }
 
@@ -105,6 +135,9 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
       setCrop('');
       setCampaign('');
       setYear(new Date().getFullYear().toString());
+      setShowValidationErrors(false);
+      setValidationErrors([]);
+      setValidationWarnings([]);
     } catch (error) {
       handleFirestoreError(error, 'create', `farms/${farmId}/ag_events`, auth);
     } finally {
@@ -523,6 +556,16 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              {validationErrors.length > 0 && (
+                <div className="mb-6">
+                  <ValidationMessage
+                    errors={validationErrors.map(e => ({ message: e.message, type: e.type }))}
+                    warnings={validationWarnings.map(w => ({ message: w.message, type: w.type }))}
+                    compact={true}
+                  />
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-2">Campaña</label>
@@ -532,7 +575,15 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                     placeholder="Ej: Verano, Invierno"
                     value={campaign}
                     onChange={e => setCampaign(e.target.value)}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-emerald-500"
+                    className={`w-full bg-stone-50 border rounded-2xl p-4 outline-none focus:ring-2 transition-all ${
+                      validationErrors.some(err => err.field === 'campaign')
+                        ? 'border-red-300 focus:ring-red-500'
+                        : 'border-stone-200 focus:ring-emerald-500'
+                    }`}
+                  />
+                  <FieldError
+                    error={validationErrors.find(e => e.field === 'campaign')?.message}
+                    warning={validationWarnings.find(w => w.field === 'campaign')?.message}
                   />
                 </div>
                 <div>
@@ -544,7 +595,15 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                     max="2100"
                     value={year}
                     onChange={e => setYear(e.target.value)}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-emerald-500"
+                    className={`w-full bg-stone-50 border rounded-2xl p-4 outline-none focus:ring-2 transition-all ${
+                      validationErrors.some(err => err.field === 'year')
+                        ? 'border-red-300 focus:ring-red-500'
+                        : 'border-stone-200 focus:ring-emerald-500'
+                    }`}
+                  />
+                  <FieldError
+                    error={validationErrors.find(e => e.field === 'year')?.message}
+                    warning={validationWarnings.find(w => w.field === 'year')?.message}
                   />
                 </div>
               </div>
@@ -572,7 +631,15 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                     placeholder="Ej: Soja de 1ra, Maíz, Trigo Pan"
                     value={crop}
                     onChange={e => setCrop(e.target.value)}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-emerald-500"
+                    className={`w-full bg-stone-50 border rounded-2xl p-4 outline-none focus:ring-2 transition-all ${
+                      validationErrors.some(err => err.field === 'crop')
+                        ? 'border-red-300 focus:ring-red-500'
+                        : 'border-stone-200 focus:ring-emerald-500'
+                    }`}
+                  />
+                  <FieldError
+                    error={validationErrors.find(e => e.field === 'crop')?.message}
+                    warning={validationWarnings.find(w => w.field === 'crop')?.message}
                   />
                 </div>
                 <div>
@@ -674,18 +741,33 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                 )}
               </div>
 
-              <div className="pt-6 border-t border-stone-100 flex gap-4">
-                <button 
+              <div className="pt-6 border-t border-stone-100 flex gap-4 items-center">
+                <button
                   type="button"
-                  onClick={() => setActiveSubTab('historial')}
+                  onClick={() => {
+                    setActiveSubTab('historial');
+                    setValidationErrors([]);
+                    setValidationWarnings([]);
+                    setShowValidationErrors(false);
+                  }}
                   className="flex-1 bg-stone-100 text-stone-600 font-bold py-4 rounded-2xl hover:bg-stone-200 transition-all"
                 >
                   Cancelar
                 </button>
-                <button 
+                {validationErrors.length > 0 && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-red-600" />
+                    <span className="text-xs font-bold text-red-600">{validationErrors.length} error{validationErrors.length > 1 ? 'es' : ''}</span>
+                  </div>
+                )}
+                <button
                   type="submit"
-                  disabled={isActionLoading}
-                  className="flex-[2] bg-emerald-600 text-white font-black py-4 rounded-2xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 uppercase tracking-widest disabled:opacity-50"
+                  disabled={isActionLoading || validationErrors.length > 0}
+                  className={`flex-[2] font-black py-4 rounded-2xl uppercase tracking-widest transition-all ${
+                    validationErrors.length > 0
+                      ? 'bg-stone-300 text-stone-500 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-100'
+                  } disabled:opacity-50`}
                 >
                   {isActionLoading ? 'Guardando...' : 'Guardar Registro'}
                 </button>
