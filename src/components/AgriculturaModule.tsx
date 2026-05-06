@@ -17,6 +17,8 @@ interface AgEvent {
   lotId: string;
   lotName: string;
   crop: string;
+  campaign: string;
+  year: number;
   details: any;
 }
 
@@ -29,13 +31,16 @@ interface Lot {
 export default function AgriculturaModule({ farmId }: { farmId: string }) {
   const [events, setEvents] = useState<AgEvent[]>([]);
   const [lots, setLots] = useState<Lot[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<'historial' | 'nueva' | 'porLote'>('historial');
+  const [activeSubTab, setActiveSubTab] = useState<'historial' | 'nueva' | 'porLote' | 'campanas'>('historial');
   const [eventType, setEventType] = useState<'siembra' | 'aplicacion' | 'cosecha'>('siembra');
-  
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('');
+
   // Form States
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedLotId, setSelectedLotId] = useState('');
   const [crop, setCrop] = useState('');
+  const [campaign, setCampaign] = useState('');
+  const [year, setYear] = useState(new Date().getFullYear().toString());
   const [details, setDetails] = useState<any>({});
   const [isActionLoading, setIsActionLoading] = useState(false);
 
@@ -74,8 +79,13 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!campaign || !year) {
+      alert('Debes seleccionar una campaña y año');
+      return;
+    }
+
     const lot = lots.find(l => l.id === selectedLotId);
-    
+
     setIsActionLoading(true);
     try {
       await addDoc(collection(db, 'farms', farmId, 'ag_events'), {
@@ -84,13 +94,17 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
         lotId: selectedLotId,
         lotName: lot?.name || 'Desconocido',
         crop,
+        campaign,
+        year: Number(year),
         details,
         createdAt: Timestamp.now()
       });
-      
+
       setActiveSubTab('historial');
       setDetails({});
       setCrop('');
+      setCampaign('');
+      setYear(new Date().getFullYear().toString());
     } catch (error) {
       handleFirestoreError(error, 'create', `farms/${farmId}/ag_events`, auth);
     } finally {
@@ -137,19 +151,25 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
           <p className="text-stone-500 text-sm">Trazabilidad completa de siembra, aplicaciones y rindes</p>
         </div>
         <div className="flex bg-stone-100 p-1 rounded-2xl overflow-x-auto scrollbar-hide">
-          <button 
+          <button
             onClick={() => setActiveSubTab('historial')}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubTab === 'historial' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
           >
             General
           </button>
-          <button 
+          <button
             onClick={() => setActiveSubTab('porLote')}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubTab === 'porLote' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
           >
             Por Lote
           </button>
-          <button 
+          <button
+            onClick={() => setActiveSubTab('campanas')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubTab === 'campanas' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+          >
+            Campañas
+          </button>
+          <button
             onClick={() => setActiveSubTab('nueva')}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubTab === 'nueva' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
           >
@@ -251,6 +271,103 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </motion.div>
+        ) : activeSubTab === 'campanas' ? (
+          <motion.div
+            key="campanas"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            className="space-y-6"
+          >
+            {Array.from(new Set(events.map(e => `${e.campaign}-${e.year}`))).map(campaignKey => {
+              const [campaignName, yearStr] = campaignKey.split('-');
+              const campaignYear = Number(yearStr);
+              const campaignEvents = events.filter(e => e.campaign === campaignName && e.year === campaignYear);
+
+              return (
+                <div key={campaignKey} className="bg-white border border-stone-200 rounded-[2.5rem] overflow-hidden shadow-sm">
+                  <div className="bg-gradient-to-r from-emerald-50 to-blue-50 px-8 py-6 border-b border-stone-200 flex justify-between items-center">
+                    <div>
+                      <h3 className="font-black text-stone-800 text-lg">Campaña {campaignName}</h3>
+                      <p className="text-sm text-stone-600 font-semibold">Año agrícola: {campaignYear}</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="px-4 py-3 bg-white rounded-xl border border-stone-100">
+                        <p className="text-[10px] text-stone-400 font-bold uppercase">Actividades</p>
+                        <p className="text-2xl font-black text-emerald-600">{campaignEvents.length}</p>
+                      </div>
+                      <div className="px-4 py-3 bg-white rounded-xl border border-stone-100">
+                        <p className="text-[10px] text-stone-400 font-bold uppercase">Lotes</p>
+                        <p className="text-2xl font-black text-blue-600">{new Set(campaignEvents.map(e => e.lotId)).size}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-8">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                        <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                          <p className="text-[10px] uppercase font-bold text-emerald-700 mb-1">Siembras</p>
+                          <p className="text-2xl font-bold text-emerald-700">
+                            {campaignEvents.filter(e => e.type === 'siembra').length}
+                          </p>
+                        </div>
+                        <div className="p-4 bg-purple-50 rounded-xl border border-purple-100">
+                          <p className="text-[10px] uppercase font-bold text-purple-700 mb-1">Aplicaciones</p>
+                          <p className="text-2xl font-bold text-purple-700">
+                            {campaignEvents.filter(e => e.type === 'aplicacion').length}
+                          </p>
+                        </div>
+                        <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                          <p className="text-[10px] uppercase font-bold text-amber-700 mb-1">Cosechas</p>
+                          <p className="text-2xl font-bold text-amber-700">
+                            {campaignEvents.filter(e => e.type === 'cosecha').length}
+                          </p>
+                        </div>
+                      </div>
+
+                      {campaignEvents.map((event, idx) => (
+                        <div key={event.id} className="flex items-start gap-4 p-4 bg-stone-50 rounded-2xl border border-stone-100 hover:border-stone-200 transition-colors">
+                          <div className={`p-3 rounded-xl shrink-0 ${
+                            event.type === 'siembra' ? 'bg-emerald-50' :
+                            event.type === 'aplicacion' ? 'bg-purple-50' : 'bg-amber-50'
+                          }`}>
+                            {getEventIcon(event.type)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
+                                event.type === 'siembra' ? 'bg-emerald-100 text-emerald-700' :
+                                event.type === 'aplicacion' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {getEventLabel(event.type)}
+                              </span>
+                              <span className="text-xs text-stone-500">{event.date.toLocaleDateString('es-AR')}</span>
+                            </div>
+                            <p className="font-bold text-stone-800">{event.crop} <span className="text-stone-400 font-normal">en</span> {event.lotName}</p>
+                          </div>
+                          <button
+                            onClick={() => deleteEvent(event.id)}
+                            className="p-2 text-stone-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {events.length === 0 && (
+              <div className="bg-white border-2 border-dashed border-stone-200 rounded-[2rem] p-12 text-center">
+                <Calendar className="w-16 h-16 text-stone-300 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-stone-800">Sin campañas registradas</h3>
+                <p className="text-stone-500 mb-6">Registra actividades para ver el historial de campañas.</p>
               </div>
             )}
           </motion.div>
@@ -406,10 +523,36 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-2">Campaña</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: Verano, Invierno"
+                    value={campaign}
+                    onChange={e => setCampaign(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-2">Año</label>
+                  <input
+                    type="number"
+                    required
+                    min="2000"
+                    max="2100"
+                    value={year}
+                    onChange={e => setYear(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-2xl p-4 outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-2">Lote / Parcela</label>
-                  <select 
+                  <select
                     required
                     value={selectedLotId}
                     onChange={e => setSelectedLotId(e.target.value)}
@@ -423,7 +566,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-2">Cultivo</label>
-                  <input 
+                  <input
                     type="text"
                     required
                     placeholder="Ej: Soja de 1ra, Maíz, Trigo Pan"
@@ -434,7 +577,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-2">Fecha</label>
-                  <input 
+                  <input
                     type="date"
                     required
                     value={formDate}
