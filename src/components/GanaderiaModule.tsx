@@ -155,8 +155,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       status: formData.status
     });
 
-    setValidationErrors(result.errors);
-    setValidationWarnings(result.warnings);
+    let allErrors = [...result.errors];
+    let allWarnings = [...result.warnings];
 
     // Validar dieta si es engorde
     if (formData.status === 'Engorde' && dietForm.ingredients.length > 0) {
@@ -165,11 +165,14 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         quantity: Number(formData.quantity) || 1
       });
 
-      setValidationErrors(prev => [...prev, ...dietResult.errors]);
-      setValidationWarnings(prev => [...prev, ...dietResult.warnings]);
+      allErrors = [...allErrors, ...dietResult.errors];
+      allWarnings = [...allWarnings, ...dietResult.warnings];
     }
 
-    return result.isValid;
+    setValidationErrors(allErrors);
+    setValidationWarnings(allWarnings);
+
+    return allErrors.length === 0;
   };
 
   const handleFormChange = (field: string, value: any) => {
@@ -255,7 +258,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       return;
     }
 
-    const qty = Number(formData.quantity) || 0;
+    setIsSubmitting(true);
     const weightPer = Number(formData.weightPerAnimal) || 0;
     const totalWeight = calculateTotalWeight(qty, weightPer);
 
