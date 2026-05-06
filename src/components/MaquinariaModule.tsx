@@ -137,65 +137,76 @@ export default function MaquinariaModule({ farmId }: { farmId: string }) {
 
       <AnimatePresence mode="wait">
         {activeView === 'lista' ? (
-          <motion.div 
+          <motion.div
             key="lista"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {machines.map(machine => (
-              <div key={machine.id} className="bg-white border border-stone-100 rounded-[2.5rem] p-6 shadow-sm hover:shadow-md transition-all group overflow-hidden relative">
-                <div className={`absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 rounded-full opacity-5 ${
-                  machine.status === 'operativa' ? 'bg-emerald-500' : 
-                  machine.status === 'mantenimiento' ? 'bg-amber-500' : 'bg-red-500'
-                }`} />
-                
-                <div className="flex justify-between items-start mb-6">
-                  <div className="p-4 bg-stone-50 rounded-2xl">
-                    <Truck className="w-8 h-8 text-stone-400" />
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                    machine.status === 'operativa' ? 'bg-emerald-100 text-emerald-700' : 
-                    machine.status === 'mantenimiento' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                  }`}>
-                    {(machine.status || '').replace('_', ' ')}
-                  </span>
-                </div>
-
-                <h3 className="text-xl font-black text-stone-900 mb-1">{machine.name}</h3>
-                <p className="text-stone-400 text-xs font-bold uppercase tracking-wider mb-4">{machine.brand} • {machine.type} • Mod {machine.year}</p>
-
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="bg-stone-50 p-3 rounded-2xl">
-                    <div className="flex items-center gap-2 text-stone-400 mb-1">
-                      <Gauge className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-bold uppercase">Uso Total</span>
-                    </div>
-                    <p className="text-lg font-black text-stone-800">{machine.currentHours} <span className="text-xs font-normal text-stone-500">hs</span></p>
-                  </div>
-                  <div className="bg-stone-50 p-3 rounded-2xl">
-                    <div className="flex items-center gap-2 text-stone-400 mb-1">
-                      <Fuel className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-bold uppercase">Estado</span>
-                    </div>
-                    <p className="text-lg font-black text-stone-800">100%</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => {
-                       setSelectedMachine(machine);
-                       setActiveView('mantenimiento');
-                       loadMaintenances(machine.id);
-                    }}
-                    className="flex-1 bg-stone-100 text-stone-600 font-bold py-3 rounded-xl hover:bg-stone-200 transition-all text-sm flex items-center justify-center gap-2"
-                  >
-                    <Wrench className="w-4 h-4" /> Mantenimiento
-                  </button>
-                </div>
+            {machines.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-stone-400 bg-white rounded-3xl border border-stone-100">
+                <Truck className="w-12 h-12 mb-4 opacity-20" />
+                <p className="font-bold">Sin maquinarias registradas</p>
+                <p className="text-sm mt-1">Hacé click en "Nueva Máquina" para agregar</p>
               </div>
-            ))}
+            ) : (
+              <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-stone-50 border-b border-stone-200">
+                    <tr className="text-stone-500 text-xs font-bold uppercase tracking-wider">
+                      <th className="px-5 py-3.5">Máquina</th>
+                      <th className="px-5 py-3.5">Tipo</th>
+                      <th className="px-5 py-3.5">Marca</th>
+                      <th className="px-5 py-3.5 text-center">Año</th>
+                      <th className="px-5 py-3.5 text-right">Horas de Uso</th>
+                      <th className="px-5 py-3.5 text-center">Estado</th>
+                      <th className="px-5 py-3.5 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {machines.map(machine => (
+                      <tr key={machine.id} className="hover:bg-stone-50 transition-colors group">
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-stone-100 rounded-xl shrink-0">
+                              <Truck className="w-4 h-4 text-stone-500" />
+                            </div>
+                            <span className="font-bold text-stone-900">{machine.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-stone-600 text-sm">{machine.type}</td>
+                        <td className="px-5 py-4 text-stone-600 text-sm">{machine.brand}</td>
+                        <td className="px-5 py-4 text-stone-600 text-sm text-center">{machine.year}</td>
+                        <td className="px-5 py-4 text-right">
+                          <span className="font-bold text-stone-800">{machine.currentHours.toLocaleString('es-AR')}</span>
+                          <span className="text-stone-400 text-xs ml-1">hs</span>
+                        </td>
+                        <td className="px-5 py-4 text-center">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                            machine.status === 'operativa' ? 'bg-emerald-100 text-emerald-700' :
+                            machine.status === 'mantenimiento' ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {(machine.status || '').replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedMachine(machine);
+                              setActiveView('mantenimiento');
+                              loadMaintenances(machine.id);
+                            }}
+                            className="inline-flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold px-3 py-1.5 rounded-xl transition-all text-xs"
+                          >
+                            <Wrench className="w-3.5 h-3.5" /> Mantenimiento
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </motion.div>
         ) : activeView === 'nuevo' ? (
           <motion.div 

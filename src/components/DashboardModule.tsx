@@ -6,7 +6,7 @@ import {
   PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
 import {
-  TrendingUp, Wallet, Users, CloudRain,
+  TrendingUp, TrendingDown, Wallet, Users, CloudRain,
   ArrowUpRight, ArrowDownRight, Activity, PieChart as PieChartIcon,
   BarChart3, Calendar, Droplets
 } from 'lucide-react';
@@ -145,27 +145,32 @@ export default function DashboardModule({ farmId, farmRains, farmExpenses }: Das
             )}
           </div>
           <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Balance Total</p>
-          <p className={`text-xl font-black ${stats.balance >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+          <p className={`text-2xl font-black ${stats.balance >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            {formatCurrency(stats.balance)}
+          </p>
+          <p className="text-xs text-stone-400 mt-1">
             $ {stats.balance.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
           </p>
         </div>
 
-        {/* Ganadería */}
-        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
-          <div className="p-2.5 bg-blue-100 rounded-2xl mb-3 w-fit">
-            <Users className="w-5 h-5 text-blue-600" />
-          </div>
-          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Stock Ganadero</p>
-          <p className="text-xl font-black text-blue-800">{stats.activeAnimals} <span className="text-xs font-semibold text-blue-400">cabezas</span></p>
-        </div>
-
         {/* Ingresos */}
         <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
-          <div className="p-2.5 bg-amber-100 rounded-2xl mb-3 w-fit">
-            <TrendingUp className="w-5 h-5 text-amber-600" />
+          <div className="p-2.5 bg-emerald-100 rounded-2xl mb-3 w-fit">
+            <TrendingUp className="w-5 h-5 text-emerald-600" />
           </div>
           <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Total Ingresos</p>
-          <p className="text-xl font-black text-amber-700">$ {stats.totalIncomes.toLocaleString('es-AR', { minimumFractionDigits: 0 })}</p>
+          <p className="text-2xl font-black text-emerald-700">{formatCurrency(stats.totalIncomes)}</p>
+          <p className="text-xs text-stone-400 mt-1">$ {stats.totalIncomes.toLocaleString('es-AR', { minimumFractionDigits: 0 })}</p>
+        </div>
+
+        {/* Gastos */}
+        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow">
+          <div className="p-2.5 bg-red-100 rounded-2xl mb-3 w-fit">
+            <TrendingDown className="w-5 h-5 text-red-500" />
+          </div>
+          <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Total Gastos</p>
+          <p className="text-2xl font-black text-red-600">{formatCurrency(stats.totalExpenses)}</p>
+          <p className="text-xs text-stone-400 mt-1">$ {stats.totalExpenses.toLocaleString('es-AR', { minimumFractionDigits: 0 })}</p>
         </div>
 
         {/* Lluvia */}
@@ -174,9 +179,41 @@ export default function DashboardModule({ farmId, farmRains, farmExpenses }: Das
             <CloudRain className="w-5 h-5 text-sky-500" />
           </div>
           <p className="text-[10px] font-black text-stone-400 uppercase tracking-widest mb-1">Lluvia Total</p>
-          <p className="text-xl font-black text-sky-700">{stats.totalRain.toFixed(0)} <span className="text-xs font-semibold text-sky-400">mm</span></p>
+          <p className="text-2xl font-black text-sky-700">{stats.totalRain.toFixed(0)} <span className="text-sm font-semibold text-sky-400">mm</span></p>
+          <p className="text-xs text-stone-400 mt-1">{stats.activeAnimals} cabezas activas</p>
         </div>
       </div>
+
+      {/* Comparativa visual ingresos vs gastos */}
+      {(stats.totalIncomes > 0 || stats.totalExpenses > 0) && (
+        <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-sm">
+          <p className="text-xs font-black text-stone-400 uppercase tracking-widest mb-3">Comparativa Ingresos vs Egresos</p>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold text-emerald-700 w-20 text-right shrink-0">{formatCurrency(stats.totalIncomes)}</span>
+            <div className="flex-1 h-4 bg-stone-100 rounded-full overflow-hidden flex">
+              {stats.totalIncomes > 0 && (
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                  style={{ width: `${Math.min(100, (stats.totalIncomes / Math.max(stats.totalIncomes, stats.totalExpenses)) * 100)}%` }}
+                />
+              )}
+            </div>
+            <span className="text-xs font-bold text-stone-400 w-16 shrink-0">Ingresos</span>
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <span className="text-xs font-bold text-red-600 w-20 text-right shrink-0">{formatCurrency(stats.totalExpenses)}</span>
+            <div className="flex-1 h-4 bg-stone-100 rounded-full overflow-hidden flex">
+              {stats.totalExpenses > 0 && (
+                <div
+                  className="h-full bg-red-400 rounded-full transition-all duration-700"
+                  style={{ width: `${Math.min(100, (stats.totalExpenses / Math.max(stats.totalIncomes, stats.totalExpenses)) * 100)}%` }}
+                />
+              )}
+            </div>
+            <span className="text-xs font-bold text-stone-400 w-16 shrink-0">Egresos</span>
+          </div>
+        </div>
+      )}
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">

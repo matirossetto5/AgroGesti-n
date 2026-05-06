@@ -122,6 +122,19 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
     }
   };
 
+  const totalIncomes = incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  const byCategory = CATEGORIES.map(cat => {
+    const total = incomes.filter(i => i.category === cat).reduce((s, i) => s + i.amount, 0);
+    return { cat, total, pct: totalIncomes > 0 ? (total / totalIncomes) * 100 : 0 };
+  }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+
+  const CAT_COLORS: Record<string, string> = {
+    'Venta de ganado': 'bg-emerald-500',
+    'Venta de granos': 'bg-amber-500',
+    'Servicios': 'bg-blue-500',
+    'Otro': 'bg-stone-400',
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -129,8 +142,8 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
           <h2 className="text-2xl font-bold text-stone-900 tracking-tight">Gestión de Ingresos</h2>
           <p className="text-stone-500 text-sm">Control de ventas y otros ingresos del campo</p>
         </div>
-        <button 
-          onClick={() => { 
+        <button
+          onClick={() => {
             setEditingId(null); 
             setFormData({ 
               date: new Date().toISOString().split('T')[0], 
@@ -146,6 +159,27 @@ export default function IngresosModule({ farmId }: IngresosModuleProps) {
           <Plus className="w-5 h-5" /> Nuevo Ingreso
         </button>
       </div>
+
+      {/* Resumen por categoría */}
+      {byCategory.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {byCategory.map(({ cat, total, pct }) => (
+            <div key={cat} className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-2.5 h-2.5 rounded-full ${CAT_COLORS[cat] ?? 'bg-stone-400'}`} />
+                <span className="text-xs font-bold text-stone-500 truncate">{cat}</span>
+              </div>
+              <p className="text-base font-black text-stone-900">
+                $ {total.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+              </p>
+              <div className="mt-2 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                <div className={`h-full ${CAT_COLORS[cat] ?? 'bg-stone-400'} rounded-full`} style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-[10px] text-stone-400 font-bold mt-1">{pct.toFixed(1)}% del total</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
         <div className="overflow-x-auto">

@@ -327,9 +327,10 @@ export default function MapasModule({ farmId, coordinates }: MapasModuleProps) {
                   click: () => !isAddingLot && setSelectedLot(lot)
                 }}
               >
-                <Tooltip sticky permanent={false}>
-                  <div className="text-xs font-bold">
-                    {lot.name} ({lot.area?.toFixed(1)} ha)
+                <Tooltip permanent direction="center" opacity={1} className="lot-label-tooltip">
+                  <div style={{ fontWeight: 700, fontSize: '12px', color: '#1c1917', background: 'transparent', border: 'none', boxShadow: 'none', whiteSpace: 'nowrap' }}>
+                    {lot.name}
+                    {lot.area ? <span style={{ fontWeight: 400, color: '#78716c', marginLeft: 4 }}>({lot.area.toFixed(1)} ha)</span> : null}
                   </div>
                 </Tooltip>
               </Polygon>
