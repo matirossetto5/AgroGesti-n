@@ -6,6 +6,7 @@ import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, Tren
 import { Herd, HerdEvent, DietIngredient, DietPlan } from '../types';
 import { validateHerdForm, validateDietForm, ValidationError } from '../lib/validators';
 import { ValidationMessage, FieldError } from './ValidationMessage';
+import { AdvancedFilters } from './AdvancedFilters';
 
 interface GanaderiaModuleProps {
   farmId: string;
@@ -37,6 +38,13 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const [selectedHerds, setSelectedHerds] = useState<string[]>([]);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const [herdToDelete, setHerdToDelete] = useState<string | null>(null);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    status: [] as string[],
+    weightRange: [50, 1000] as [number, number],
+    sex: [] as string[],
+    dateRange: ['', ''] as [string, string]
+  });
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,6 +95,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const handleOpenModal = (herd?: Herd, mode: 'view' | 'edit' = 'view') => {
     setModalMode(mode);
+    setValidationErrors([]);
+    setValidationWarnings([]);
+    setShowValidationErrors(false);
     if (herd) {
       setEditingHerd(herd);
       setFormData({
@@ -303,12 +314,45 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     }
   };
 
-  const filteredHerds = herds.filter(h => {
-    const sTerm = (searchTerm || '').toLowerCase();
-    return (h.name || '').toLowerCase().includes(sTerm) ||
-           (h.sex || '').toLowerCase().includes(sTerm) ||
-           (h.status || '').toLowerCase().includes(sTerm);
-  });
+  const applyFilters = (herdsToFilter: Herd[]) => {
+    return herdsToFilter.filter(h => {
+      // Búsqueda por nombre/sexo/estado
+      const sTerm = (searchTerm || '').toLowerCase();
+      const matchesSearch =
+        (h.name || '').toLowerCase().includes(sTerm) ||
+        (h.sex || '').toLowerCase().includes(sTerm) ||
+        (h.status || '').toLowerCase().includes(sTerm);
+
+      if (!matchesSearch) return false;
+
+      // Filtro por estado
+      if (filters.status.length > 0 && !filters.status.includes(h.status)) {
+        return false;
+      }
+
+      // Filtro por sexo
+      if (filters.sex.length > 0 && !filters.sex.includes(h.sex)) {
+        return false;
+      }
+
+      // Filtro por rango de peso
+      const weight = h.weightPerAnimal;
+      if (weight < filters.weightRange[0] || weight > filters.weightRange[1]) {
+        return false;
+      }
+
+      // Filtro por fecha de creación
+      if (filters.dateRange[0] || filters.dateRange[1]) {
+        const createdDate = new Date(h.createdAt).toISOString().split('T')[0];
+        if (filters.dateRange[0] && createdDate < filters.dateRange[0]) return false;
+        if (filters.dateRange[1] && createdDate > filters.dateRange[1]) return false;
+      }
+
+      return true;
+    });
+  };
+
+  const filteredHerds = applyFilters(herds);
 
   const totalAnimals = herds.reduce((sum, h) => sum + (h.quantity || 0), 0);
   const totalWeight = herds.reduce((sum, h) => sum + (h.totalWeight || 0), 0);
@@ -373,13 +417,22 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           />
         </div>
         <button
-          onClick={() => handleOpenModal()}
+          onClick={() => handleOpenModal(undefined, 'edit')}
           className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
         >
           <Plus className="w-5 h-5" />
           <span>Nuevo Rodeo</span>
         </button>
       </div>
+
+      {/* Advanced Filters */}
+      <AdvancedFilters
+        isOpen={isFiltersOpen}
+        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        filters={filters}
+        onFiltersChange={setFilters}
+        onReset={() => setFilters({ status: [], weightRange: [50, 1000], sex: [], dateRange: ['', ''] })}
+      />
 
       {selectedHerds.length > 0 && (
         <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl flex items-center justify-between shadow-sm">
