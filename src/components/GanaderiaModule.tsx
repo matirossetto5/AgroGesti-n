@@ -615,7 +615,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 bg-white">
               {modalTab === 'details' ? (
-                <form id="herd-form" onSubmit={handleSubmit}>
+                <form id="herd-form" onSubmit={handleSubmit} noValidate>
                   {validationErrors.length > 0 && (
                     <div className="mb-6">
                       <ValidationMessage
