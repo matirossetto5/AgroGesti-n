@@ -110,53 +110,6 @@ interface Farm {
   incomes: IncomeRecord[];
 }
 
-// --- DEMO DATA ---
-const DEMO_FARMS: Farm[] = [
-  {
-    id: 'demo-campo-1',
-    name: 'La Esperanza',
-    location: 'Buenos Aires, General Villegas',
-    coordinates: '-35.0308, -63.0157',
-    owner: 'Agropecuaria del Norte S.A.',
-    manager: 'Carlos Rodríguez',
-    userId: 'demo',
-    rains: [
-      { id: 'r1', date: '2026-04-20', mm: 25 },
-      { id: 'r2', date: '2026-04-10', mm: 12 },
-      { id: 'r3', date: '2026-03-28', mm: 40 },
-      { id: 'r4', date: '2026-03-15', mm: 18 },
-      { id: 'r5', date: '2026-02-22', mm: 30 },
-    ],
-    expenses: [
-      { id: 'e1', date: '2026-04-15', category: 'Agrícolas', description: 'Compra de semillas de soja', amount: 450000 },
-      { id: 'e2', date: '2026-04-08', category: 'Maquinaria', description: 'Reparación de tractor John Deere', amount: 180000, machineId: '' },
-      { id: 'e3', date: '2026-03-20', category: 'Ganaderos', description: 'Vacuna antiaftosa rodeo completo', amount: 75000 },
-      { id: 'e4', date: '2026-03-05', category: 'Gastos generales', description: 'Combustible mensual', amount: 120000 },
-      { id: 'e5', date: '2026-02-18', category: 'Agrícolas', description: 'Herbicida glifosato 200L', amount: 310000 },
-    ],
-    incomes: [],
-  },
-  {
-    id: 'demo-campo-2',
-    name: 'Santa Rosa',
-    location: 'Córdoba, Río Cuarto',
-    coordinates: '-33.1307, -64.3499',
-    owner: 'Estancia Santa Rosa',
-    manager: 'María González',
-    userId: 'demo',
-    rains: [
-      { id: 'r6', date: '2026-04-18', mm: 15 },
-      { id: 'r7', date: '2026-03-30', mm: 55 },
-      { id: 'r8', date: '2026-03-12', mm: 8 },
-    ],
-    expenses: [
-      { id: 'e6', date: '2026-04-12', category: 'Ganaderos', description: 'Suplemento mineral rodeo', amount: 95000 },
-      { id: 'e7', date: '2026-03-25', category: 'Gastos generales', description: 'Reparación de alambrados', amount: 65000 },
-    ],
-    incomes: [],
-  },
-];
-
 // --- MAIN APP COMPONENT ---
 export default function AgroApp() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -181,8 +134,6 @@ export default function AgroApp() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [isActionLoading, setIsActionLoading] = useState(false);
-  const [isDemoMode, setIsDemoMode] = useState(false);
-  const [demoNotice, setDemoNotice] = useState(false);
 
   // Modal State
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
@@ -231,11 +182,6 @@ export default function AgroApp() {
   };
 
   const selectedFarm = farms.find(f => f.id === selectedFarmId);
-
-  const showDemoNotice = () => {
-    setDemoNotice(true);
-    setTimeout(() => setDemoNotice(false), 3000);
-  };
 
   // --- AUTH & FIRESTORE EFFECTS ---
   useEffect(() => {
@@ -344,12 +290,6 @@ export default function AgroApp() {
       window.removeEventListener('beforeunload', handleUnload);
     };
   }, [selectedFarmId, user, userProfile.firstName, userProfile.lastName, userProfile.photoBase64]);
-
-  useEffect(() => {
-    if (!isDemoMode) return;
-    setFarms(DEMO_FARMS);
-    setUserProfile({ firstName: 'Demo', lastName: 'Usuario', profession: 'Ingeniero Agrónomo', photoBase64: '' });
-  }, [isDemoMode]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -472,7 +412,6 @@ export default function AgroApp() {
 
   const handleFarmSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isDemoMode) { showDemoNotice(); return; }
     if (!farmForm.name || !user) return;
     
     setIsActionLoading(true);
@@ -527,7 +466,6 @@ export default function AgroApp() {
   };
 
   const deleteFarm = async (id: string) => {
-    if (isDemoMode) { showDemoNotice(); return; }
     setIsActionLoading(true);
     try {
       await deleteDoc(doc(db, 'farms', id));
@@ -543,7 +481,6 @@ export default function AgroApp() {
 
   const handleAddRain = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isDemoMode) { showDemoNotice(); return; }
     if (!selectedFarmId || !rainForm.date || !rainForm.mm || !selectedFarm) return;
     
     setIsActionLoading(true);
@@ -562,7 +499,6 @@ export default function AgroApp() {
   };
 
   const deleteRain = async (rainId: string) => {
-    if (isDemoMode) { showDemoNotice(); return; }
     if (!selectedFarm || !selectedFarmId) return;
     setConfirmDialog({
       isOpen: true,
@@ -587,7 +523,6 @@ export default function AgroApp() {
 
   const handleExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isDemoMode) { showDemoNotice(); return; }
     if (!selectedFarmId || !expenseForm.date || !expenseForm.description || !expenseForm.amount || !selectedFarm) return;
     
     setIsActionLoading(true);
@@ -644,7 +579,6 @@ export default function AgroApp() {
   };
 
   const deleteExpense = async (expenseId: string) => {
-    if (isDemoMode) { showDemoNotice(); return; }
     if (!selectedFarm || !selectedFarmId) return;
     setConfirmDialog({
       isOpen: true,
@@ -694,11 +628,11 @@ export default function AgroApp() {
 
   // --- RENDER ---
 
-  if (!isAuthReady && !isDemoMode) {
+  if (!isAuthReady) {
     return <div className="min-h-screen flex items-center justify-center bg-stone-100 text-stone-600">Cargando...</div>;
   }
 
-  if (!user && !isDemoMode) {
+  if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-100 p-4 font-sans">
         <div className="bg-white p-8 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] max-w-md w-full border border-stone-100">
@@ -771,8 +705,8 @@ export default function AgroApp() {
             </div>
           </div>
 
-          <button
-            onClick={handleGoogleLogin}
+          <button 
+            onClick={handleGoogleLogin} 
             type="button"
             className="w-full bg-white border border-stone-300 hover:bg-stone-50 text-stone-700 font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-3 shadow-sm"
           >
@@ -784,25 +718,6 @@ export default function AgroApp() {
             </svg>
             Google
           </button>
-
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-stone-200"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-stone-400">¿Quieres explorar primero?</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setIsDemoMode(true)}
-            className="w-full bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            <Sprout className="w-4 h-4" />
-            Ver vista previa con datos de ejemplo
-          </button>
-          <p className="text-center text-xs text-stone-400 mt-2">Sin registro — solo exploración</p>
         </div>
       </div>
     );
@@ -811,21 +726,8 @@ export default function AgroApp() {
   return (
     <div className="min-h-screen bg-stone-100 text-stone-900 font-sans">
       <AnimatePresence>
-        {demoNotice && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-md"
-          >
-            <div className="bg-amber-500 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border-2 border-white">
-              <Sprout className="w-5 h-5 shrink-0" />
-              <p className="text-sm font-semibold">Esta función no está disponible en el modo vista previa. Registrate para usar la app completa.</p>
-            </div>
-          </motion.div>
-        )}
         {globalError && (
-          <motion.div
+          <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -922,41 +824,33 @@ export default function AgroApp() {
               </div>
             )}
             <div className="flex items-center gap-2 sm:gap-4 border-l border-stone-200 pl-4">
-              {!isDemoMode && (
-                <button
-                  onClick={() => { setShowProfileModal(true); setIsEditingProfile(false); setProfileError(''); }}
-                  className="flex items-center gap-2 sm:gap-3 text-left hover:bg-stone-100 p-1 rounded-xl transition-all"
-                >
-                  <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-emerald-100 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center shrink-0">
-                    {userProfile.photoBase64 ? (
-                      <img src={userProfile.photoBase64} alt="Profile" className="w-full h-full object-cover" />
-                    ) : user?.photoURL ? (
-                      <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <User className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
-                    )}
-                  </div>
-                  <div className="hidden sm:block max-w-[120px]">
-                    <p className="text-xs font-bold text-stone-900 leading-tight truncate">
-                      {userProfile.firstName || user?.displayName?.split(' ')[0] || 'Mi Perfil'}
-                    </p>
-                    <p className="text-[10px] text-stone-500 font-medium truncate">
-                      {userProfile.profession || 'Administrador'}
-                    </p>
-                  </div>
-                </button>
-              )}
-              {isDemoMode && (
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl">
-                  <Sprout className="w-4 h-4 text-amber-600" />
-                  <span className="text-xs font-bold text-amber-700">Vista Previa</span>
+              <button 
+                onClick={() => { setShowProfileModal(true); setIsEditingProfile(false); setProfileError(''); }}
+                className="flex items-center gap-2 sm:gap-3 text-left hover:bg-stone-100 p-1 rounded-xl transition-all"
+              >
+                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-emerald-100 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center shrink-0">
+                  {userProfile.photoBase64 ? (
+                    <img src={userProfile.photoBase64} alt="Profile" className="w-full h-full object-cover" />
+                  ) : user.photoURL ? (
+                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <User className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
+                  )}
                 </div>
-              )}
+                <div className="hidden sm:block max-w-[120px]">
+                  <p className="text-xs font-bold text-stone-900 leading-tight truncate">
+                    {userProfile.firstName || user?.displayName?.split(' ')[0] || 'Mi Perfil'}
+                  </p>
+                  <p className="text-[10px] text-stone-500 font-medium truncate">
+                    {userProfile.profession || 'Administrador'}
+                  </p>
+                </div>
+              </button>
 
-              <button
-                onClick={() => isDemoMode ? (setIsDemoMode(false), setFarms([]), setSelectedFarmId(null)) : signOut(auth)}
+              <button 
+                onClick={() => signOut(auth)}
                 className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                title={isDemoMode ? 'Salir del demo' : 'Cerrar Sesión'}
+                title="Cerrar Sesión"
               >
                 <LogOut className="w-5 h-5" />
               </button>
@@ -964,20 +858,6 @@ export default function AgroApp() {
           </div>
         </div>
       </header>
-
-      {/* Demo Mode Banner */}
-      {isDemoMode && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-center text-sm text-amber-800 flex items-center justify-center gap-3">
-          <Sprout className="w-4 h-4 text-amber-600 shrink-0" />
-          <span><span className="font-bold">Modo Vista Previa</span> — Explorás la app con datos de ejemplo. Los cambios no se guardan.</span>
-          <button
-            onClick={() => { setIsDemoMode(false); setFarms([]); setSelectedFarmId(null); }}
-            className="ml-2 text-amber-700 underline font-bold hover:text-amber-900 transition-colors whitespace-nowrap"
-          >
-            Salir del demo
-          </button>
-        </div>
-      )}
 
       {/* Profile Modal */}
       {showProfileModal && (
