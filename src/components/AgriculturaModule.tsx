@@ -48,6 +48,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
 
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
 
   useEffect(() => {
     if (!farmId) return;
@@ -83,6 +84,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
   }, [farmId]);
 
   const validateAgriculturalForm = (): boolean => {
+    setShowValidationErrors(true);
     const errors: ValidationError[] = [];
     const warnings: ValidationError[] = [];
 
@@ -133,6 +135,9 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
       setCrop('');
       setCampaign('');
       setYear(new Date().getFullYear().toString());
+      setShowValidationErrors(false);
+      setValidationErrors([]);
+      setValidationWarnings([]);
     } catch (error) {
       handleFirestoreError(error, 'create', `farms/${farmId}/ag_events`, auth);
     } finally {
@@ -743,6 +748,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                     setActiveSubTab('historial');
                     setValidationErrors([]);
                     setValidationWarnings([]);
+                    setShowValidationErrors(false);
                   }}
                   className="flex-1 bg-stone-100 text-stone-600 font-bold py-4 rounded-2xl hover:bg-stone-200 transition-all"
                 >

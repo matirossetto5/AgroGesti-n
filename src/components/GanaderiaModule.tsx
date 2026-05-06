@@ -62,6 +62,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
 
   useEffect(() => {
     if (!farmId) return;
@@ -128,9 +129,11 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     setEditingHerd(null);
     setValidationErrors([]);
     setValidationWarnings([]);
+    setShowValidationErrors(false);
   };
 
   const validateForm = () => {
+    setShowValidationErrors(true);
     const result = validateHerdForm({
       name: formData.name,
       quantity: formData.quantity,
@@ -157,18 +160,20 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const handleFormChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    // Validar en tiempo real
-    setTimeout(() => {
-      const result = validateHerdForm({
-        name: field === 'name' ? value : formData.name,
-        quantity: field === 'quantity' ? value : formData.quantity,
-        weightPerAnimal: field === 'weightPerAnimal' ? value : formData.weightPerAnimal,
-        status: field === 'status' ? value : formData.status
-      });
+    // Solo validar en tiempo real si ya mostró errores antes
+    if (showValidationErrors) {
+      setTimeout(() => {
+        const result = validateHerdForm({
+          name: field === 'name' ? value : formData.name,
+          quantity: field === 'quantity' ? value : formData.quantity,
+          weightPerAnimal: field === 'weightPerAnimal' ? value : formData.weightPerAnimal,
+          status: field === 'status' ? value : formData.status
+        });
 
-      setValidationErrors(result.errors);
-      setValidationWarnings(result.warnings);
-    }, 300);
+        setValidationErrors(result.errors);
+        setValidationWarnings(result.warnings);
+      }, 300);
+    }
   };
 
   const calculateTotalWeight = (qty: number, weight: number) => qty * weight;
