@@ -72,6 +72,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
 
+  // Un rodeo nuevo (editingHerd === null) siempre es editable; los existentes dependen de modalMode
+  const isEditing = !editingHerd || modalMode === 'edit';
+
   useEffect(() => {
     if (!farmId) return;
 
@@ -245,7 +248,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (modalMode === 'view') return;
+    if (!isEditing) return;
 
     // Validar antes de guardar
     if (!validateForm()) {
@@ -563,7 +566,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     {editingHerd ? `Rodeo: ${editingHerd.name}` : 'Nuevo Rodeo'}
                   </h3>
                   <p className="text-sm text-stone-500">
-                    {modalMode === 'view' ? 'Visualización' : 'Edición'}
+                    {isEditing ? 'Edición' : 'Visualización'}
                   </p>
                 </div>
               </div>
@@ -619,7 +622,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     </div>
                   )}
 
-                  <fieldset disabled={modalMode === 'view'} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <fieldset disabled={!isEditing} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-stone-700">Nombre del Rodeo</label>
                       <input
@@ -718,7 +721,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                         placeholder="Información adicional..."
                       />
                     </div>
-                    {!modalMode && (
+                    {isEditing && (
                       <div className="md:col-span-2 p-4 bg-stone-50 rounded-xl">
                         <p className="text-sm text-stone-600">
                           <strong>Peso Total:</strong> {calculateTotalWeight(Number(formData.quantity) || 0, Number(formData.weightPerAnimal) || 0).toLocaleString()} kg
@@ -734,7 +737,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       <label className="text-sm font-bold text-stone-700">Nombre de la Dieta</label>
                       <input
                         type="text"
-                        disabled={modalMode === 'view'}
+                        disabled={!isEditing}
                         value={dietForm.name}
                         onChange={(e) => setDietForm({ ...dietForm, name: e.target.value })}
                         className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-stone-50"
@@ -745,7 +748,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <h4 className="font-bold text-stone-800">Insumos</h4>
-                        {modalMode === 'edit' && (
+                        {isEditing && (
                           <button
                             type="button"
                             onClick={handleAddDietIngredient}
@@ -764,7 +767,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                             <div key={idx} className="grid grid-cols-4 gap-2 p-3 bg-stone-50 rounded-lg">
                               <input
                                 type="text"
-                                disabled={modalMode === 'view'}
+                                disabled={!isEditing}
                                 list="ingredients-list"
                                 value={ing.type}
                                 onChange={(e) => handleUpdateDietIngredient(idx, 'type', e.target.value)}
@@ -773,7 +776,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                               />
                               <input
                                 type="number"
-                                disabled={modalMode === 'view'}
+                                disabled={!isEditing}
                                 value={ing.kg}
                                 onChange={(e) => handleUpdateDietIngredient(idx, 'kg', e.target.value)}
                                 placeholder="kg"
@@ -783,7 +786,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                               />
                               <input
                                 type="number"
-                                disabled={modalMode === 'view'}
+                                disabled={!isEditing}
                                 value={ing.pricePerKg}
                                 onChange={(e) => handleUpdateDietIngredient(idx, 'pricePerKg', e.target.value)}
                                 placeholder="Precio/kg"
@@ -793,7 +796,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                               />
                               <div className="flex items-center justify-between">
                                 <span className="text-sm font-bold text-stone-700">${ing.totalPrice.toFixed(2)}</span>
-                                {modalMode === 'edit' && (
+                                {isEditing && (
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveDietIngredient(idx)}
@@ -831,7 +834,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {modalMode === 'edit' && (
+                  {isEditing && (
                     <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
                       <h4 className="text-sm font-bold text-emerald-800 mb-3 uppercase tracking-wider flex items-center gap-2">
                         <Plus className="w-4 h-4" />
@@ -891,7 +894,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                                 <p className="font-bold text-stone-800">{event.type}</p>
                                 <p className="text-sm text-stone-600">{event.description}</p>
                               </div>
-                              {modalMode === 'edit' && (
+                              {isEditing && (
                                 <button
                                   onClick={() => handleRemoveEvent(event.id)}
                                   className="text-red-600 hover:text-red-700 p-1"
@@ -915,9 +918,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 onClick={handleCloseModal}
                 className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
               >
-                {modalMode === 'view' ? 'Cerrar' : 'Cancelar'}
+                {!isEditing ? 'Cerrar' : 'Cancelar'}
               </button>
-              {modalMode === 'edit' && (
+              {isEditing && (
                 <div className="flex items-center gap-2">
                   {validationErrors.length > 0 && (
                     <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
