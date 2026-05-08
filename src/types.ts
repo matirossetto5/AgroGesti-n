@@ -1,47 +1,37 @@
-export interface HerdEvent {
+export interface TropaEvent {
   id: string;
   date: string;
-  type: 'Medicación' | 'Pesaje' | 'Dieta' | 'Control Veterinario' | 'Otro';
+  type: 'Pesaje' | 'Medicación' | 'Control Veterinario' | 'Traslado' | 'Otro';
   description?: string;
-  dietDetails?: DietEvent;
+  weightPerAnimal?: number;
+  quantity?: number;
 }
 
-export interface DietEvent {
-  ingredients: DietIngredient[];
-  totalCostPerDay: number;
-  totalKgPerDay: number;
-}
-
-export interface DietIngredient {
-  type: string;
-  kg: number;
-  pricePerKg: number;
-  totalPrice: number;
-}
-
-export interface Herd {
+export interface RegistroRacion {
   id: string;
-  name: string;
-  sex: 'Macho' | 'Hembra' | 'Mixto';
-  quantity: number;
-  weightPerAnimal: number;
-  totalWeight: number;
-  status: 'Recría' | 'Engorde';
-  stage?: 'Iniciación' | 'Crecimiento' | 'Terminación';
-  feedingPlan?: DietPlan;
-  events: HerdEvent[];
-  createdAt: string;
-  updatedAt: string;
+  date: string;
+  siloMaiz: number;
+  maizPartido: number;
+  concentradoProteico: number;
+  precioSiloMaiz?: number;
+  precioMaizPartido?: number;
+  precioConcentrado?: number;
   notes?: string;
 }
 
-export interface DietPlan {
+export interface Tropa {
   id: string;
-  herdId: string;
   name: string;
-  ingredients: DietIngredient[];
-  totalKgPerDay: number;
-  totalCostPerDay: number;
+  sex: 'Macho' | 'Hembra';
+  quantity: number;
+  entryDate: string;
+  entryWeight: number;
+  currentWeight: number;
+  status: 'Recría' | 'Terminación';
+  terminationStartDate?: string;
+  events: TropaEvent[];
+  raciones?: RegistroRacion[];
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }

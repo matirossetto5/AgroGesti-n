@@ -1,1027 +1,1304 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
-import { db, auth } from '../firebase';
-import { handleFirestoreError } from '../lib/errorHandlers';
-import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed } from 'lucide-react';
-import { Herd, HerdEvent, DietIngredient, DietPlan } from '../types';
-import { validateHerdForm, validateDietForm, ValidationError } from '../lib/validators';
-import { ValidationMessage, FieldError } from './ValidationMessage';
-import { AdvancedFilters } from './AdvancedFilters';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import {
+  Plus, Edit2, Trash2, Search, Scale, X, History,
+  TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed,
+  ArrowRight, ShoppingCart, Activity, CheckCircle, Clock,
+  Users
+} from 'lucide-react';
+import { Tropa, TropaEvent, RegistroRacion } from '../types';
 
 interface GanaderiaModuleProps {
   farmId: string;
 }
 
-const SEXES = ['Macho', 'Hembra', 'Mixto'];
-const STATUSES = ['Recría', 'Engorde'];
-const STAGES = ['Iniciación', 'Crecimiento', 'Terminación'];
-const INGREDIENTS = [
-  { name: 'Maíz partido', type: 'Granos' },
-  { name: 'Maíz entero', type: 'Granos' },
-  { name: 'Sorgo', type: 'Granos' },
-  { name: 'Concentrado proteico', type: 'Concentrados' },
-  { name: 'Harina de soja', type: 'Concentrados' },
-  { name: 'Alfalfa molida', type: 'Forrajes' },
-  { name: 'Avena', type: 'Granos' }
-];
-const EVENT_TYPES = ['Medicación', 'Pesaje', 'Dieta', 'Control Veterinario', 'Otro'];
+const CONFINEMENT_ENTRY_KG = 400;
+const SALE_WEIGHT_MIN_KG = 470;
+const TERMINACION_TARGET_DAYS = 90;
+
+// ---- Helper components ----
+
+function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color: 'emerald' | 'blue' | 'sky' | 'amber' }) {
+  const palette = {
+    emerald: 'bg-emerald-50 text-emerald-600',
+    blue: 'bg-blue-50 text-blue-600',
+    sky: 'bg-sky-50 text-sky-600',
+    amber: 'bg-amber-50 text-amber-600',
+  };
+  return (
+    <div className="bg-white p-5 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-4">
+      <div className={`p-3 rounded-xl ${palette[color]}`}>{icon}</div>
+      <div>
+        <p className="text-xs text-stone-500 font-medium uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-bold text-stone-900">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, icon, highlight }: { label: string; value: string; icon: React.ReactNode; highlight?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-stone-400 shrink-0">{icon}</span>
+      <div>
+        <p className="text-xs text-stone-500">{label}</p>
+        <p className={`text-sm font-semibold ${highlight ? 'text-amber-700 font-bold' : 'text-stone-700'}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({ onClick, icon, label, variant }: { onClick: () => void; icon: React.ReactNode; label: string; variant: 'blue' | 'amber' | 'emerald' | 'ghost' }) {
+  const styles = {
+    blue: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+    amber: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
+    emerald: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+    ghost: 'bg-stone-100 text-stone-600 hover:bg-stone-200',
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${styles[variant]}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="text-center py-16 text-stone-400 border-2 border-dashed border-stone-100 rounded-2xl">
+      <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
+      <p className="font-medium">{text}</p>
+    </div>
+  );
+}
+
+interface ModalProps {
+  title: string;
+  onClose: () => void;
+  onSave: () => void;
+  isSubmitting?: boolean;
+  saveLabel?: string;
+  saveVariant?: 'emerald' | 'amber' | 'red';
+  error?: string | null;
+  children: React.ReactNode;
+  maxWidth?: string;
+}
+
+function Modal({ title, onClose, onSave, isSubmitting, saveLabel = 'Guardar', saveVariant = 'emerald', error, children, maxWidth = 'max-w-2xl' }: ModalProps) {
+  const btnColors = {
+    emerald: 'bg-emerald-600 hover:bg-emerald-700',
+    amber: 'bg-amber-500 hover:bg-amber-600',
+    red: 'bg-red-600 hover:bg-red-700',
+  };
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className={`bg-white rounded-2xl shadow-xl w-full ${maxWidth} flex flex-col max-h-[90vh]`}>
+        <div className="p-5 border-b border-stone-100 flex justify-between items-center bg-stone-50/50 shrink-0">
+          <h3 className="font-bold text-stone-900 text-lg">{title}</h3>
+          <button onClick={onClose} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
+            <X className="w-5 h-5 text-stone-400" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="p-5 border-t border-stone-100 bg-stone-50/50 shrink-0 space-y-2">
+          {error && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all">
+              Cancelar
+            </button>
+            <button
+              onClick={onSave}
+              disabled={isSubmitting}
+              className={`px-8 py-2.5 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed ${btnColors[saveVariant]}`}
+            >
+              {isSubmitting ? 'Guardando...' : saveLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Main Component ----
 
 export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
-  const [herds, setHerds] = useState<Herd[]>([]);
+  const [tropas, setTropas] = useState<Tropa[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'recria' | 'terminacion'>('recria');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingHerd, setEditingHerd] = useState<Herd | null>(null);
-  const [modalMode, setModalMode] = useState<'view' | 'edit'>('view');
-  const [modalTab, setModalTab] = useState<'details' | 'history'>('details');
-  const [isDietModalOpen, setIsDietModalOpen] = useState(false);
-  const [dietHerdId, setDietHerdId] = useState<string>('');
+
+  // Herd modal
+  const [isHerdOpen, setIsHerdOpen] = useState(false);
+  const [editingTropa, setEditingTropa] = useState<Tropa | null>(null);
+  const [herdForm, setHerdForm] = useState({
+    name: '', sex: 'Macho' as 'Macho' | 'Hembra',
+    quantity: '', entryDate: '', entryWeight: '', notes: '',
+  });
+  const [herdErrors, setHerdErrors] = useState<string[]>([]);
+
+  // Pesaje modal
+  const [isPesajeOpen, setIsPesajeOpen] = useState(false);
+  const [pesajeTropaId, setPesajeTropaId] = useState('');
+  const [pesajeForm, setPesajeForm] = useState({ date: '', weight: '', notes: '' });
+
+  // Terminación modal
+  const [isTerminacionOpen, setIsTerminacionOpen] = useState(false);
+  const [terminacionTropaId, setTerminacionTropaId] = useState('');
+
+  // Ración modal
+  const [isRacionOpen, setIsRacionOpen] = useState(false);
+  const [racionTropaId, setRacionTropaId] = useState('');
+  const [racionForm, setRacionForm] = useState({
+    date: '', siloMaiz: '', maizPartido: '', concentradoProteico: '',
+    precioSiloMaiz: '', precioMaizPartido: '', precioConcentrado: '', notes: '',
+  });
+
+  // Venta modal
+  const [isVentaOpen, setIsVentaOpen] = useState(false);
+  const [ventaTropaId, setVentaTropaId] = useState('');
+  const [ventaForm, setVentaForm] = useState({
+    date: '', quantity: '', weightAtSale: '', pricePerKg: '', notes: '',
+  });
+
+  // Historial modal
+  const [isHistorialOpen, setIsHistorialOpen] = useState(false);
+  const [historialTropa, setHistorialTropa] = useState<Tropa | null>(null);
+  const [historialTab, setHistorialTab] = useState<'eventos' | 'raciones'>('eventos');
+
+  // Delete confirm
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedHerds, setSelectedHerds] = useState<string[]>([]);
-  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
-  const [herdToDelete, setHerdToDelete] = useState<string | null>(null);
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState({
-    status: [] as string[],
-    weightRange: [50, 1000] as [number, number],
-    sex: [] as string[],
-    dateRange: ['', ''] as [string, string]
-  });
-  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
-  const [mergeName, setMergeName] = useState('');
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    sex: 'Macho' as 'Macho' | 'Hembra' | 'Mixto',
-    quantity: '',
-    weightPerAnimal: '',
-    status: 'Recría' as 'Recría' | 'Engorde',
-    stage: 'Iniciación' as 'Iniciación' | 'Crecimiento' | 'Terminación',
-    notes: '',
-    events: [] as HerdEvent[]
-  });
-
-  const [dietForm, setDietForm] = useState({
-    name: '',
-    ingredients: [] as DietIngredient[]
-  });
-
-  const [newEvent, setNewEvent] = useState({
-    date: new Date().toISOString().split('T')[0],
-    type: 'Medicación' as HerdEvent['type'],
-    description: ''
-  });
-
-  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-  const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
-  const [showValidationErrors, setShowValidationErrors] = useState(false);
-
-  // Un rodeo nuevo (editingHerd === null) siempre es editable; los existentes dependen de modalMode
-  const isEditing = !editingHerd || modalMode === 'edit';
+  const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     if (!farmId) return;
-
-    const herdsRef = collection(db, `farms/${farmId}/herds`);
-    const q = query(herdsRef, orderBy('name', 'asc'));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const herdsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Herd[];
-      setHerds(herdsData);
+    const q = query(collection(db, `farms/${farmId}/herds`), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      setTropas(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Tropa[]);
       setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching herds:", error?.message || error);
+    }, (err) => {
+      console.error('Error loading tropas:', err);
       setIsLoading(false);
     });
-
-    return () => unsubscribe();
+    return () => unsub();
   }, [farmId]);
 
-  const handleOpenModal = (herd?: Herd, mode: 'view' | 'edit' = 'view') => {
-    setModalMode(mode);
-    setValidationErrors([]);
-    setValidationWarnings([]);
-    setShowValidationErrors(false);
-    if (herd) {
-      setEditingHerd(herd);
-      setFormData({
-        name: herd.name,
-        sex: herd.sex,
-        quantity: herd.quantity.toString(),
-        weightPerAnimal: herd.weightPerAnimal.toString(),
-        status: herd.status,
-        stage: herd.stage || 'Iniciación',
-        notes: herd.notes || '',
-        events: herd.events || []
-      });
-      setModalTab('details');
-    } else {
-      setEditingHerd(null);
-      setFormData({
-        name: '',
-        sex: 'Macho',
-        quantity: '',
-        weightPerAnimal: '',
-        status: 'Recría',
-        stage: 'Iniciación',
-        notes: '',
-        events: []
-      });
-      setModalTab('details');
-    }
-    setIsModalOpen(true);
+  // ---- Derived values ----
+  const recriaTropas = tropas.filter(t => t.status === 'Recría');
+  const terminacionTropas = tropas.filter(t => t.status === 'Terminación');
+  const totalAnimals = tropas.reduce((s, t) => s + (t.quantity || 0), 0);
+  const readyForConfinement = recriaTropas.filter(t => t.currentWeight >= CONFINEMENT_ENTRY_KG);
+  const readyForSale = terminacionTropas.filter(t => t.currentWeight >= SALE_WEIGHT_MIN_KG);
+
+  const filterList = (list: Tropa[]) => {
+    const term = searchTerm.toLowerCase();
+    if (!term) return list;
+    return list.filter(t => t.name.toLowerCase().includes(term) || t.sex.toLowerCase().includes(term));
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setEditingHerd(null);
-    setValidationErrors([]);
-    setValidationWarnings([]);
-    setShowValidationErrors(false);
-    setSaveError(null);
+  const getDaysIn = (tropa: Tropa) => {
+    const ref = tropa.status === 'Terminación'
+      ? (tropa.terminationStartDate || tropa.createdAt)
+      : (tropa.entryDate || tropa.createdAt);
+    return Math.max(0, Math.floor((Date.now() - new Date(ref).getTime()) / 86400000));
   };
 
-  const validateForm = () => {
-    setShowValidationErrors(true);
-    const result = validateHerdForm({
-      name: formData.name,
-      quantity: formData.quantity,
-      weightPerAnimal: formData.weightPerAnimal,
-      status: formData.status
+  const getRacionCostPerAnimal = (r: RegistroRacion) =>
+    r.siloMaiz * (r.precioSiloMaiz || 0) +
+    r.maizPartido * (r.precioMaizPartido || 0) +
+    r.concentradoProteico * (r.precioConcentrado || 0);
+
+  // ---- Handlers ----
+
+  const openNewHerd = () => {
+    setEditingTropa(null);
+    setHerdForm({ name: '', sex: 'Macho', quantity: '', entryDate: today, entryWeight: '', notes: '' });
+    setHerdErrors([]);
+    setModalError(null);
+    setIsHerdOpen(true);
+  };
+
+  const openEditHerd = (t: Tropa) => {
+    setEditingTropa(t);
+    setHerdForm({
+      name: t.name, sex: t.sex,
+      quantity: t.quantity.toString(),
+      entryDate: t.entryDate || today,
+      entryWeight: t.entryWeight.toString(),
+      notes: t.notes || '',
     });
-
-    setValidationErrors(result.errors);
-    setValidationWarnings(result.warnings);
-
-    return allErrors.length === 0;
+    setHerdErrors([]);
+    setModalError(null);
+    setIsHerdOpen(true);
   };
 
-  const handleFormChange = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Solo validar en tiempo real si ya mostró errores antes
-    if (showValidationErrors) {
-      setTimeout(() => {
-        const result = validateHerdForm({
-          name: field === 'name' ? value : formData.name,
-          quantity: field === 'quantity' ? value : formData.quantity,
-          weightPerAnimal: field === 'weightPerAnimal' ? value : formData.weightPerAnimal,
-          status: field === 'status' ? value : formData.status
-        });
-
-        setValidationErrors(result.errors);
-        setValidationWarnings(result.warnings);
-      }, 300);
-    }
-  };
-
-  const calculateTotalWeight = (qty: number, weight: number) => qty * weight;
-
-  const calculateDietCosts = (ingredients: DietIngredient[]) => {
-    const totalKg = ingredients.reduce((sum, ing) => sum + ing.kg, 0);
-    const totalPrice = ingredients.reduce((sum, ing) => sum + (ing.kg * ing.pricePerKg), 0);
-    return { totalKg, totalPrice };
-  };
-
-  const handleAddEvent = () => {
-    if (!newEvent.description) return;
-    const event: HerdEvent = {
-      id: Date.now().toString(),
-      ...newEvent,
-      type: newEvent.type as HerdEvent['type']
-    };
-    setFormData(prev => ({ ...prev, events: [event, ...prev.events] }));
-    setNewEvent({
-      date: new Date().toISOString().split('T')[0],
-      type: 'Medicación',
-      description: ''
-    });
-  };
-
-  const handleRemoveEvent = (eventId: string) => {
-    setFormData(prev => ({ ...prev, events: prev.events.filter(e => e.id !== eventId) }));
-  };
-
-  const handleOpenDietModal = () => {
-    const engordoHerds = herds.filter(h => h.status === 'Engorde');
-    const firstHerd = engordoHerds[0];
-    if (firstHerd) {
-      setDietHerdId(firstHerd.id);
-      setDietForm(firstHerd.feedingPlan
-        ? { name: firstHerd.feedingPlan.name, ingredients: firstHerd.feedingPlan.ingredients }
-        : { name: '', ingredients: [] }
-      );
-    } else {
-      setDietHerdId('');
-      setDietForm({ name: '', ingredients: [] });
-    }
-    setSaveError(null);
-    setIsDietModalOpen(true);
-  };
-
-  const handleDietHerdChange = (herdId: string) => {
-    setDietHerdId(herdId);
-    const herd = herds.find(h => h.id === herdId);
-    setDietForm(herd?.feedingPlan
-      ? { name: herd.feedingPlan.name, ingredients: herd.feedingPlan.ingredients }
-      : { name: '', ingredients: [] }
-    );
-  };
-
-  const handleSaveDiet = async () => {
-    if (!dietHerdId) return;
-    setSaveError(null);
-    setIsSubmitting(true);
-    try {
-      const herd = herds.find(h => h.id === dietHerdId);
-      if (!herd) return;
-      const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
-      const feedingPlan = dietForm.ingredients.length > 0 ? {
-        id: herd.feedingPlan?.id || Date.now().toString(),
-        herdId: herd.id,
-        name: dietForm.name,
-        ingredients: dietForm.ingredients,
-        totalKgPerDay: totalKg,
-        totalCostPerDay: totalPrice,
-        createdAt: herd.feedingPlan?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      } : null;
-      await updateDoc(doc(db, `farms/${farmId}/herds`, dietHerdId), {
-        feedingPlan,
-        updatedAt: new Date().toISOString()
-      });
-      setIsDietModalOpen(false);
-    } catch (error: any) {
-      console.error('Error guardando dieta:', error);
-      setSaveError(error?.message || 'Error al guardar la dieta. Verificá tu conexión e intentá de nuevo.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleAddDietIngredient = () => {
-    setDietForm(prev => ({
-      ...prev,
-      ingredients: [...prev.ingredients, { type: '', kg: 0, pricePerKg: 0, totalPrice: 0 }]
-    }));
-  };
-
-  const handleRemoveDietIngredient = (index: number) => {
-    setDietForm(prev => ({
-      ...prev,
-      ingredients: prev.ingredients.filter((_, i) => i !== index)
-    }));
-  };
-
-  const handleUpdateDietIngredient = (index: number, field: keyof DietIngredient, value: any) => {
-    setDietForm(prev => {
-      const newIngredients = [...prev.ingredients];
-      const ingredient = newIngredients[index];
-      if (field === 'kg' || field === 'pricePerKg') {
-        ingredient[field] = Number(value);
-        ingredient.totalPrice = ingredient.kg * ingredient.pricePerKg;
-      } else {
-        ingredient[field] = value;
-      }
-      newIngredients[index] = ingredient;
-      return { ...prev, ingredients: newIngredients };
-    });
-  };
-
-  const handleSave = async () => {
-    setSaveError(null);
-
-    // Validar
-    const isValid = validateForm();
-    if (!isValid) return;
+  const saveHerd = async () => {
+    const errs: string[] = [];
+    if (!herdForm.name.trim()) errs.push('Nombre requerido.');
+    const qty = Number(herdForm.quantity);
+    if (!herdForm.quantity || isNaN(qty) || qty < 1 || !Number.isInteger(qty)) errs.push('Cantidad inválida (mínimo 1 animal, número entero).');
+    const weight = Number(herdForm.entryWeight);
+    if (!herdForm.entryWeight || isNaN(weight) || weight < 50) errs.push('Peso de ingreso inválido (mínimo 50 kg).');
+    if (!herdForm.entryDate) errs.push('Fecha de ingreso requerida.');
+    if (errs.length) { setHerdErrors(errs); return; }
 
     setIsSubmitting(true);
+    setModalError(null);
     try {
-      const qty = Number(formData.quantity) || 0;
-      const weightPer = Number(formData.weightPerAnimal) || 0;
-
-      const herdData = {
-        name: formData.name.trim(),
-        sex: formData.sex,
+      const data = {
+        name: herdForm.name.trim(),
+        sex: herdForm.sex,
         quantity: qty,
-        weightPerAnimal: weightPer,
-        totalWeight: qty * weightPer,
-        status: formData.status,
-        stage: formData.stage,
-        notes: formData.notes,
-        events: formData.events,
-        feedingPlan: editingHerd?.feedingPlan || null,
-        updatedAt: new Date().toISOString()
+        entryDate: herdForm.entryDate,
+        entryWeight: weight,
+        currentWeight: editingTropa ? editingTropa.currentWeight : weight,
+        status: editingTropa ? editingTropa.status : 'Recría' as const,
+        terminationStartDate: editingTropa?.terminationStartDate || null,
+        events: editingTropa?.events || [],
+        raciones: editingTropa?.raciones || [],
+        notes: herdForm.notes,
+        updatedAt: new Date().toISOString(),
       };
-
-      if (editingHerd) {
-        await updateDoc(doc(db, `farms/${farmId}/herds`, editingHerd.id), herdData);
+      if (editingTropa) {
+        await updateDoc(doc(db, `farms/${farmId}/herds`, editingTropa.id), data);
       } else {
-        await addDoc(collection(db, `farms/${farmId}/herds`), {
-          ...herdData,
-          createdAt: new Date().toISOString()
-        });
+        await addDoc(collection(db, `farms/${farmId}/herds`), { ...data, createdAt: new Date().toISOString() });
       }
-      handleCloseModal();
-    } catch (error: any) {
-      console.error('Error guardando tropa:', error);
-      setSaveError(error?.message || 'Error al guardar. Verificá tu conexión e intentá de nuevo.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleMergeTropas = async () => {
-    if (selectedHerds.length < 2 || !mergeName.trim()) return;
-    setIsSubmitting(true);
-    try {
-      const tropasMezcladas = herds.filter(h => selectedHerds.includes(h.id));
-      const totalQty = tropasMezcladas.reduce((sum, h) => sum + h.quantity, 0);
-      const weightedAvg = totalQty > 0
-        ? tropasMezcladas.reduce((sum, h) => sum + h.weightPerAnimal * h.quantity, 0) / totalQty
-        : 0;
-      const allEvents = tropasMezcladas.flatMap(h => h.events || []);
-      const allNotes = tropasMezcladas.map(h => h.notes).filter(Boolean).join(' | ');
-      const first = tropasMezcladas[0];
-
-      const mergedData = {
-        name: mergeName.trim(),
-        sex: 'Mixto' as const,
-        quantity: totalQty,
-        weightPerAnimal: Math.round(weightedAvg),
-        totalWeight: totalQty * Math.round(weightedAvg),
-        status: first.status,
-        stage: first.stage || 'Iniciación',
-        notes: allNotes,
-        events: allEvents,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      const batch = writeBatch(db);
-      const newRef = doc(collection(db, `farms/${farmId}/herds`));
-      batch.set(newRef, mergedData);
-      tropasMezcladas.forEach(h => {
-        batch.delete(doc(db, `farms/${farmId}/herds`, h.id));
-      });
-      await batch.commit();
-
-      setIsMergeModalOpen(false);
-      setMergeName('');
-      setSelectedHerds([]);
-    } catch (error) {
-      handleFirestoreError(error, 'create', `farms/${farmId}/herds`, auth);
+      setIsHerdOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al guardar.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const confirmDelete = async () => {
-    if (!herdToDelete) return;
+    if (!deleteId) return;
     setIsSubmitting(true);
     try {
-      await deleteDoc(doc(db, `farms/${farmId}/herds`, herdToDelete));
-      setIsConfirmDeleteOpen(false);
-      setHerdToDelete(null);
-    } catch (error) {
-      handleFirestoreError(error, 'delete', `farms/${farmId}/herds/${herdToDelete}`, auth);
-      setIsConfirmDeleteOpen(false);
-      setHerdToDelete(null);
+      await deleteDoc(doc(db, `farms/${farmId}/herds`, deleteId));
+    } catch (e) { console.error(e); }
+    setIsSubmitting(false);
+    setIsDeleteOpen(false);
+    setDeleteId(null);
+  };
+
+  const openPesaje = (tropaId: string) => {
+    setPesajeTropaId(tropaId);
+    setPesajeForm({ date: today, weight: '', notes: '' });
+    setModalError(null);
+    setIsPesajeOpen(true);
+  };
+
+  const savePesaje = async () => {
+    const w = Number(pesajeForm.weight);
+    if (!pesajeForm.weight || isNaN(w) || w < 50) { setModalError('Ingresá un peso válido (mínimo 50 kg).'); return; }
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const tropa = tropas.find(t => t.id === pesajeTropaId)!;
+      const event: TropaEvent = {
+        id: Date.now().toString(),
+        date: pesajeForm.date,
+        type: 'Pesaje',
+        description: pesajeForm.notes || `Peso registrado: ${w} kg/animal`,
+        weightPerAnimal: w,
+        quantity: tropa.quantity,
+      };
+      await updateDoc(doc(db, `farms/${farmId}/herds`, pesajeTropaId), {
+        currentWeight: w,
+        events: [event, ...(tropa.events || [])],
+        updatedAt: new Date().toISOString(),
+      });
+      setIsPesajeOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al guardar pesaje.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const applyFilters = (herdsToFilter: Herd[]) => {
-    return herdsToFilter.filter(h => {
-      // Búsqueda por nombre/sexo/estado
-      const sTerm = (searchTerm || '').toLowerCase();
-      const matchesSearch =
-        (h.name || '').toLowerCase().includes(sTerm) ||
-        (h.sex || '').toLowerCase().includes(sTerm) ||
-        (h.status || '').toLowerCase().includes(sTerm);
-
-      if (!matchesSearch) return false;
-
-      // Filtro por estado
-      if (filters.status.length > 0 && !filters.status.includes(h.status)) {
-        return false;
-      }
-
-      // Filtro por sexo
-      if (filters.sex.length > 0 && !filters.sex.includes(h.sex)) {
-        return false;
-      }
-
-      // Filtro por rango de peso
-      const weight = h.weightPerAnimal;
-      if (weight < filters.weightRange[0] || weight > filters.weightRange[1]) {
-        return false;
-      }
-
-      // Filtro por fecha de creación
-      if (filters.dateRange[0] || filters.dateRange[1]) {
-        const createdDate = new Date(h.createdAt).toISOString().split('T')[0];
-        if (filters.dateRange[0] && createdDate < filters.dateRange[0]) return false;
-        if (filters.dateRange[1] && createdDate > filters.dateRange[1]) return false;
-      }
-
-      return true;
-    });
+  const openTerminacion = (tropaId: string) => {
+    setTerminacionTropaId(tropaId);
+    setModalError(null);
+    setIsTerminacionOpen(true);
   };
 
-  const filteredHerds = applyFilters(herds);
+  const saveTerminacion = async () => {
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const tropa = tropas.find(t => t.id === terminacionTropaId)!;
+      const event: TropaEvent = {
+        id: Date.now().toString(),
+        date: today,
+        type: 'Traslado',
+        description: `Ingreso a confinamiento (Terminación). Peso promedio: ${tropa.currentWeight} kg/animal. Días en recría: ${getDaysIn(tropa)}.`,
+      };
+      await updateDoc(doc(db, `farms/${farmId}/herds`, terminacionTropaId), {
+        status: 'Terminación',
+        terminationStartDate: today,
+        events: [event, ...(tropa.events || [])],
+        updatedAt: new Date().toISOString(),
+      });
+      setIsTerminacionOpen(false);
+      setActiveTab('terminacion');
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al mover a terminación.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  const totalAnimals = herds.reduce((sum, h) => sum + (h.quantity || 0), 0);
-  const totalWeight = herds.reduce((sum, h) => sum + (h.totalWeight || 0), 0);
-  const engordoHerds = herds.filter(h => h.status === 'Engorde').length;
+  const openRacion = (tropaId: string) => {
+    setRacionTropaId(tropaId);
+    setRacionForm({ date: today, siloMaiz: '', maizPartido: '', concentradoProteico: '', precioSiloMaiz: '', precioMaizPartido: '', precioConcentrado: '', notes: '' });
+    setModalError(null);
+    setIsRacionOpen(true);
+  };
+
+  const saveRacion = async () => {
+    const s = Number(racionForm.siloMaiz) || 0;
+    const m = Number(racionForm.maizPartido) || 0;
+    const c = Number(racionForm.concentradoProteico) || 0;
+    if (s + m + c <= 0) { setModalError('Ingresá al menos una cantidad mayor a 0.'); return; }
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const tropa = tropas.find(t => t.id === racionTropaId)!;
+      const racion: RegistroRacion = {
+        id: Date.now().toString(),
+        date: racionForm.date,
+        siloMaiz: s,
+        maizPartido: m,
+        concentradoProteico: c,
+        precioSiloMaiz: Number(racionForm.precioSiloMaiz) || 0,
+        precioMaizPartido: Number(racionForm.precioMaizPartido) || 0,
+        precioConcentrado: Number(racionForm.precioConcentrado) || 0,
+        notes: racionForm.notes || undefined,
+      };
+      await updateDoc(doc(db, `farms/${farmId}/herds`, racionTropaId), {
+        raciones: [racion, ...(tropa.raciones || [])],
+        updatedAt: new Date().toISOString(),
+      });
+      setIsRacionOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al guardar ración.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openVenta = (tropaId: string) => {
+    const tropa = tropas.find(t => t.id === tropaId)!;
+    setVentaTropaId(tropaId);
+    setVentaForm({ date: today, quantity: tropa.quantity.toString(), weightAtSale: tropa.currentWeight.toString(), pricePerKg: '', notes: '' });
+    setModalError(null);
+    setIsVentaOpen(true);
+  };
+
+  const saveVenta = async () => {
+    const qty = Number(ventaForm.quantity);
+    const w = Number(ventaForm.weightAtSale);
+    if (!qty || qty < 1 || !w || w < 50) { setModalError('Completá cantidad y peso correctamente.'); return; }
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const tropa = tropas.find(t => t.id === ventaTropaId)!;
+      if (qty > tropa.quantity) {
+        setModalError(`No podés vender más de ${tropa.quantity} animales.`);
+        setIsSubmitting(false);
+        return;
+      }
+      const pxkg = Number(ventaForm.pricePerKg) || 0;
+      const totalIncome = qty * w * pxkg;
+      const event: TropaEvent = {
+        id: Date.now().toString(),
+        date: ventaForm.date,
+        type: 'Otro',
+        description: `Venta/Faena: ${qty} animales · ${w} kg/an.${pxkg ? ` · $${pxkg}/kg · Total: $${totalIncome.toLocaleString()}` : ''}${ventaForm.notes ? ` · ${ventaForm.notes}` : ''}`,
+      };
+      const remaining = tropa.quantity - qty;
+      if (remaining <= 0) {
+        await deleteDoc(doc(db, `farms/${farmId}/herds`, ventaTropaId));
+      } else {
+        await updateDoc(doc(db, `farms/${farmId}/herds`, ventaTropaId), {
+          quantity: remaining,
+          events: [event, ...(tropa.events || [])],
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      setIsVentaOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al registrar venta.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ---- Render ----
 
   if (isLoading) {
-    return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div></div>;
+    return (
+      <div className="flex justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+      </div>
+    );
   }
+
+  const filteredRecria = filterList(recriaTropas);
+  const filteredTerminacion = filterList(terminacionTropas);
+
+  // Computed values for pesaje modal (outside JSX to avoid IIFE issues)
+  const pesajeTropa = tropas.find(t => t.id === pesajeTropaId);
+  const pesajeNewWeight = Number(pesajeForm.weight);
+  const pesajeReadyForConf = pesajeTropa?.status === 'Recría' && pesajeNewWeight >= CONFINEMENT_ENTRY_KG;
+
+  // Computed values for ración modal
+  const racionTropa = tropas.find(t => t.id === racionTropaId);
+  const rSilo = Number(racionForm.siloMaiz) || 0;
+  const rMaiz = Number(racionForm.maizPartido) || 0;
+  const rConc = Number(racionForm.concentradoProteico) || 0;
+  const rTotalPerAnimal = rSilo + rMaiz + rConc;
+  const rCostPerAnimal =
+    rSilo * (Number(racionForm.precioSiloMaiz) || 0) +
+    rMaiz * (Number(racionForm.precioMaizPartido) || 0) +
+    rConc * (Number(racionForm.precioConcentrado) || 0);
+
+  // Computed values for venta modal
+  const ventaTropa = tropas.find(t => t.id === ventaTropaId);
+  const vQty = Number(ventaForm.quantity) || 0;
+  const vWeight = Number(ventaForm.weightAtSale) || 0;
+  const vPxKg = Number(ventaForm.pricePerKg) || 0;
+  const vTotal = vQty * vWeight * vPxKg;
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
-          <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl">
-            <Activity className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Tropas</p>
-            <p className="text-3xl font-bold text-stone-900">{herds.length}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
-          <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl">
-            <Scale className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Animales</p>
-            <p className="text-3xl font-bold text-stone-900">{totalAnimals}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
-          <div className="p-4 bg-amber-50 text-amber-600 rounded-2xl">
-            <TrendingUp className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Peso Total (kg)</p>
-            <p className="text-3xl font-bold text-stone-900">{totalWeight.toLocaleString()}</p>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center space-x-5">
-          <div className="p-4 bg-purple-50 text-purple-600 rounded-2xl">
-            <Syringe className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">En Engorde</p>
-            <p className="text-3xl font-bold text-stone-900">{engordoHerds}</p>
-          </div>
-        </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={<Activity className="w-6 h-6" />} label="Total Tropas" value={tropas.length} color="emerald" />
+        <StatCard icon={<Users className="w-6 h-6" />} label="Total Animales" value={totalAnimals} color="blue" />
+        <StatCard icon={<TrendingUp className="w-6 h-6" />} label="En Recría" value={recriaTropas.length} color="sky" />
+        <StatCard icon={<UtensilsCrossed className="w-6 h-6" />} label="En Terminación" value={terminacionTropas.length} color="amber" />
       </div>
 
-      {/* Header & Search */}
+      {/* Alert banners */}
+      {readyForConfinement.length > 0 && (
+        <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+          <p className="text-sm font-semibold text-amber-800">
+            {readyForConfinement.length} tropa{readyForConfinement.length > 1 ? 's' : ''} con peso ≥ {CONFINEMENT_ENTRY_KG} kg —{' '}
+            lista{readyForConfinement.length > 1 ? 's' : ''} para pasar a Terminación en confinamiento.
+          </p>
+        </div>
+      )}
+      {readyForSale.length > 0 && (
+        <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+          <p className="text-sm font-semibold text-emerald-800">
+            {readyForSale.length} tropa{readyForSale.length > 1 ? 's' : ''} con peso ≥ {SALE_WEIGHT_MIN_KG} kg —{' '}
+            lista{readyForSale.length > 1 ? 's' : ''} para venta/faena.
+          </p>
+        </div>
+      )}
+
+      {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <input
             type="text"
-            placeholder="Buscar tropa por nombre, sexo o estado..."
+            placeholder="Buscar tropa..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={e => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleOpenDietModal}
-            disabled={engordoHerds === 0}
-            className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
-            title={engordoHerds === 0 ? 'No hay tropas en Engorde' : 'Gestionar dietas de tropas en Engorde'}
-          >
-            <UtensilsCrossed className="w-5 h-5" />
-            <span>Gestionar Dietas</span>
-          </button>
-          <button
-            onClick={() => handleOpenModal(undefined, 'edit')}
-            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Nueva Tropa</span>
-          </button>
-        </div>
+        <button
+          onClick={openNewHerd}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
+        >
+          <Plus className="w-5 h-5" />
+          Nueva Tropa
+        </button>
       </div>
 
-      {/* Advanced Filters */}
-      <AdvancedFilters
-        isOpen={isFiltersOpen}
-        onToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        filters={filters}
-        onFiltersChange={setFilters}
-        onReset={() => setFilters({ status: [], weightRange: [50, 1000], sex: [], dateRange: ['', ''] })}
-      />
-
-      {selectedHerds.length > 0 && (
-        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl flex items-center justify-between shadow-sm">
-          <span className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4" />
-            {selectedHerds.length} tropa{selectedHerds.length > 1 ? 's' : ''} seleccionada{selectedHerds.length > 1 ? 's' : ''}
-          </span>
-          <div className="flex gap-2">
-            {selectedHerds.length >= 2 && (
-              <button
-                onClick={() => {
-                  setMergeName('');
-                  setIsMergeModalOpen(true);
-                }}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
-              >
-                Mezclar Tropas
-              </button>
-            )}
-            <button
-              onClick={() => setSelectedHerds([])}
-              className="bg-stone-200 hover:bg-stone-300 text-stone-700 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
-            >
-              Deshacer
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 text-sm">
-                <th className="p-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedHerds.length === filteredHerds.length && filteredHerds.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedHerds(filteredHerds.map(h => h.id));
-                      } else {
-                        setSelectedHerds([]);
-                      }
-                    }}
-                  />
-                </th>
-                <th className="p-4 font-medium">Nombre</th>
-                <th className="p-4 font-medium">Sexo</th>
-                <th className="p-4 font-medium">Cantidad</th>
-                <th className="p-4 font-medium">Peso Prom./Animal (kg)</th>
-                <th className="p-4 font-medium">Peso Total (kg)</th>
-                <th className="p-4 font-medium">Estado</th>
-                <th className="p-4 font-medium">Etapa</th>
-                <th className="p-4 font-medium text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-200">
-              {filteredHerds.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-stone-500">
-                    No se encontraron tropas.
-                  </td>
-                </tr>
-              ) : (
-                filteredHerds.map((herd) => (
-                  <tr key={herd.id} className="hover:bg-stone-50 transition-colors">
-                    <td className="p-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedHerds.includes(herd.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedHerds([...selectedHerds, herd.id]);
-                          } else {
-                            setSelectedHerds(selectedHerds.filter(id => id !== herd.id));
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="p-4 font-medium text-stone-800">{herd.name}</td>
-                    <td className="p-4 text-stone-600">{herd.sex}</td>
-                    <td className="p-4 text-stone-600">{herd.quantity}</td>
-                    <td className="p-4 text-stone-600">{herd.weightPerAnimal}</td>
-                    <td className="p-4 text-stone-600 font-medium">{herd.totalWeight.toLocaleString()}</td>
-                    <td className="p-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        herd.status === 'Recría' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
-                      }`}>
-                        {herd.status}
-                      </span>
-                    </td>
-                    <td className="p-4 text-stone-600">{herd.stage || '-'}</td>
-                    <td className="p-4 text-right space-x-2">
-                      <button
-                        onClick={() => handleOpenModal(herd, 'view')}
-                        className="p-2 text-stone-400 hover:text-emerald-600 transition-colors"
-                        title="Ver"
-                      >
-                        <Activity className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleOpenModal(herd, 'edit')}
-                        className="p-2 text-stone-400 hover:text-emerald-600 transition-colors"
-                        title="Editar"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setHerdToDelete(herd.id);
-                          setIsConfirmDeleteOpen(true);
-                        }}
-                        className="p-2 text-stone-400 hover:text-red-600 transition-colors"
-                        title="Eliminar"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Tabs */}
+      <div className="flex border-b border-stone-200">
+        <button
+          onClick={() => setActiveTab('recria')}
+          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
+            activeTab === 'recria'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-stone-400 hover:text-stone-600'
+          }`}
+        >
+          Recría Pastoril ({recriaTropas.length})
+          {readyForConfinement.length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-amber-500 text-white text-xs rounded-full">{readyForConfinement.length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('terminacion')}
+          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
+            activeTab === 'terminacion'
+              ? 'border-amber-600 text-amber-600'
+              : 'border-transparent text-stone-400 hover:text-stone-600'
+          }`}
+        >
+          Terminación / Confinamiento ({terminacionTropas.length})
+          {readyForSale.length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-emerald-500 text-white text-xs rounded-full">{readyForSale.length}</span>
+          )}
+        </button>
       </div>
 
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Header */}
-            <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-stone-900">
-                    {editingHerd ? `Tropa: ${editingHerd.name}` : 'Nueva Tropa'}
-                  </h3>
-                  <p className="text-sm text-stone-500">
-                    {isEditing ? 'Edición' : 'Visualización'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleCloseModal}
-                className="p-2 hover:bg-stone-200 rounded-full transition-colors"
-              >
-                <X className="w-6 h-6 text-stone-400" />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-stone-100 bg-white">
-              <button
-                onClick={() => setModalTab('details')}
-                className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
-                  modalTab === 'details' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
-                }`}
-              >
-                Detalles
-              </button>
-              <button
-                onClick={() => setModalTab('history')}
-                className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
-                  modalTab === 'history' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
-                }`}
-              >
-                Historial
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 bg-white">
-              {modalTab === 'details' ? (
-                <div>
-                  {validationErrors.length > 0 && (
-                    <div className="mb-6">
-                      <ValidationMessage
-                        errors={validationErrors.map(e => ({ message: e.message, type: e.type }))}
-                        warnings={validationWarnings.map(w => ({ message: w.message, type: w.type }))}
-                        compact={true}
-                      />
-                    </div>
-                  )}
-
-                  <fieldset disabled={!isEditing} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Nombre de la Tropa</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.name}
-                        onChange={(e) => handleFormChange('name', e.target.value)}
-                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
-                          validationErrors.some(e => e.field === 'name')
-                            ? 'border-red-300 focus:ring-red-500'
-                            : 'border-stone-200 focus:ring-emerald-500'
-                        }`}
-                        placeholder="Ej: Tropa A"
-                      />
-                      <FieldError
-                        error={validationErrors.find(e => e.field === 'name')?.message}
-                        warning={validationWarnings.find(w => w.field === 'name')?.message}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Sexo</label>
-                      <select
-                        value={formData.sex}
-                        onChange={(e) => setFormData({ ...formData, sex: e.target.value as any })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
-                      >
-                        {SEXES.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Cantidad de Animales</label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        value={formData.quantity}
-                        onChange={(e) => handleFormChange('quantity', e.target.value)}
-                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
-                          validationErrors.some(e => e.field === 'quantity')
-                            ? 'border-red-300 focus:ring-red-500'
-                            : 'border-stone-200 focus:ring-emerald-500'
-                        }`}
-                      />
-                      <FieldError
-                        error={validationErrors.find(e => e.field === 'quantity')?.message}
-                        warning={validationWarnings.find(w => w.field === 'quantity')?.message}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Peso Promedio por Animal (kg)</label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        value={formData.weightPerAnimal}
-                        onChange={(e) => handleFormChange('weightPerAnimal', e.target.value)}
-                        className={`w-full p-2.5 border rounded-xl focus:ring-2 outline-none transition-all disabled:bg-stone-50 ${
-                          validationErrors.some(e => e.field === 'weightPerAnimal')
-                            ? 'border-red-300 focus:ring-red-500'
-                            : 'border-stone-200 focus:ring-emerald-500'
-                        }`}
-                      />
-                      <FieldError
-                        error={validationErrors.find(e => e.field === 'weightPerAnimal')?.message}
-                        warning={validationWarnings.find(w => w.field === 'weightPerAnimal')?.message}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Estado</label>
-                      <select
-                        value={formData.status}
-                        onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
-                      >
-                        {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    {formData.status === 'Engorde' && (
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-stone-700">Etapa</label>
-                        <select
-                          value={formData.stage}
-                          onChange={(e) => setFormData({ ...formData, stage: e.target.value as any })}
-                          className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:bg-stone-50"
-                        >
-                          {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-bold text-stone-700">Notas</label>
-                      <textarea
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none transition-all disabled:bg-stone-50"
-                        placeholder="Información adicional..."
-                      />
-                    </div>
-                    {isEditing && (
-                      <div className="md:col-span-2 p-4 bg-stone-50 rounded-xl">
-                        <p className="text-sm text-stone-600">
-                          <strong>Peso Total:</strong> {calculateTotalWeight(Number(formData.quantity) || 0, Number(formData.weightPerAnimal) || 0).toLocaleString()} kg
-                        </p>
-                      </div>
-                    )}
-                  </fieldset>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {isEditing && (
-                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                      <h4 className="text-sm font-bold text-emerald-800 mb-3 uppercase tracking-wider flex items-center gap-2">
-                        <Plus className="w-4 h-4" />
-                        Registrar Evento
-                      </h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <input
-                          type="date"
-                          value={newEvent.date}
-                          onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
-                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
-                        <select
-                          value={newEvent.type}
-                          onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value as any })}
-                          className="p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                        >
-                          {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Descripción..."
-                            value={newEvent.description}
-                            onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                            className="flex-1 p-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleAddEvent}
-                            className="bg-emerald-600 text-white p-2.5 rounded-xl hover:bg-emerald-700"
-                          >
-                            <Plus className="w-5 h-5" />
-                          </button>
+      {/* ---- RECRÍA TAB ---- */}
+      {activeTab === 'recria' && (
+        filteredRecria.length === 0 ? (
+          <EmptyState text={recriaTropas.length === 0 ? 'No hay tropas en recría. Registrá una nueva tropa.' : 'Sin resultados para la búsqueda.'} />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {filteredRecria.map(tropa => {
+              const ready = tropa.currentWeight >= CONFINEMENT_ENTRY_KG;
+              const days = getDaysIn(tropa);
+              const weightGain = tropa.currentWeight - tropa.entryWeight;
+              return (
+                <div key={tropa.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md ${ready ? 'border-amber-300' : 'border-stone-200'}`}>
+                  {/* Header */}
+                  <div className={`px-5 py-4 ${ready ? 'bg-amber-50' : 'bg-blue-50'}`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-stone-900 text-lg leading-tight truncate">{tropa.name}</h3>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tropa.sex === 'Macho' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
+                            {tropa.sex}
+                          </span>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Recría</span>
+                          {ready && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              ≥{CONFINEMENT_ENTRY_KG} kg
+                            </span>
+                          )}
                         </div>
                       </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => openEditHerd(tropa)} className="p-1.5 text-stone-400 hover:text-emerald-600 transition-colors rounded" title="Editar">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => { setDeleteId(tropa.id); setIsDeleteOpen(true); }} className="p-1.5 text-stone-400 hover:text-red-600 transition-colors rounded" title="Eliminar">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  )}
+                  </div>
 
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
-                      <History className="w-4 h-4" />
-                      Eventos Registrados
-                    </h4>
-                    {formData.events.length === 0 ? (
-                      <div className="text-center py-12 text-stone-400 border-2 border-dashed border-stone-100 rounded-2xl">
-                        <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p className="font-medium">Sin eventos</p>
+                  {/* Body */}
+                  <div className="px-5 py-4 grid grid-cols-2 gap-3">
+                    <Metric label="Animales" value={tropa.quantity.toString()} icon={<Users className="w-4 h-4" />} />
+                    <Metric label="Peso actual" value={`${tropa.currentWeight} kg`} icon={<Scale className="w-4 h-4" />} highlight={ready} />
+                    <Metric label="Ingresó con" value={`${tropa.entryWeight} kg`} icon={<TrendingUp className="w-4 h-4" />} />
+                    <Metric label="Ganancia" value={`${weightGain >= 0 ? '+' : ''}${weightGain} kg`} icon={<TrendingUp className="w-4 h-4" />} />
+                    <Metric label="Días en campo" value={`${days} días`} icon={<Clock className="w-4 h-4" />} />
+                    <Metric label="Ingreso" value={tropa.entryDate || '-'} icon={<Activity className="w-4 h-4" />} />
+                  </div>
+
+                  {/* Footer actions */}
+                  <div className="px-5 pb-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
+                    <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Registrar Pesaje" variant="blue" />
+                    {ready && (
+                      <ActionBtn onClick={() => openTerminacion(tropa.id)} icon={<ArrowRight className="w-4 h-4" />} label="Pasar a Terminación" variant="amber" />
+                    )}
+                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* ---- TERMINACIÓN TAB ---- */}
+      {activeTab === 'terminacion' && (
+        filteredTerminacion.length === 0 ? (
+          <EmptyState text={terminacionTropas.length === 0 ? 'No hay tropas en terminación.' : 'Sin resultados para la búsqueda.'} />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {filteredTerminacion.map(tropa => {
+              const readyToSell = tropa.currentWeight >= SALE_WEIGHT_MIN_KG;
+              const daysInConf = getDaysIn(tropa);
+              const confProgress = Math.min(100, Math.round((daysInConf / TERMINACION_TARGET_DAYS) * 100));
+              const sortedRaciones = [...(tropa.raciones || [])].sort((a, b) => b.date.localeCompare(a.date));
+              const lastRacion = sortedRaciones[0];
+              return (
+                <div key={tropa.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md ${readyToSell ? 'border-emerald-300' : 'border-stone-200'}`}>
+                  {/* Header */}
+                  <div className={`px-5 py-4 ${readyToSell ? 'bg-emerald-50' : 'bg-amber-50'}`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-stone-900 text-lg leading-tight truncate">{tropa.name}</h3>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tropa.sex === 'Macho' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
+                            {tropa.sex}
+                          </span>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">Terminación</span>
+                          {readyToSell && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              Listo para venta
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => openEditHerd(tropa)} className="p-1.5 text-stone-400 hover:text-emerald-600 transition-colors rounded">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => { setDeleteId(tropa.id); setIsDeleteOpen(true); }} className="p-1.5 text-stone-400 hover:text-red-600 transition-colors rounded">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="px-5 py-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Metric label="Animales" value={tropa.quantity.toString()} icon={<Users className="w-4 h-4" />} />
+                      <Metric label="Peso actual" value={`${tropa.currentWeight} kg`} icon={<Scale className="w-4 h-4" />} highlight={readyToSell} />
+                    </div>
+
+                    {/* Confinement progress bar */}
+                    <div>
+                      <div className="flex justify-between text-xs text-stone-500 mb-1">
+                        <span>Días en confinamiento</span>
+                        <span className="font-semibold">{daysInConf} / {TERMINACION_TARGET_DAYS} días</span>
+                      </div>
+                      <div className="w-full bg-stone-100 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${daysInConf >= TERMINACION_TARGET_DAYS ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                          style={{ width: `${confProgress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Last ración summary */}
+                    {lastRacion ? (
+                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                        <p className="text-xs font-bold text-stone-600 mb-1.5">Última ración — {lastRacion.date}</p>
+                        <div className="space-y-0.5 text-xs text-stone-600">
+                          {lastRacion.siloMaiz > 0 && <p>Silo maíz: <span className="font-bold">{lastRacion.siloMaiz} kg/an.</span></p>}
+                          {lastRacion.maizPartido > 0 && <p>Maíz partido: <span className="font-bold">{lastRacion.maizPartido} kg/an.</span></p>}
+                          {lastRacion.concentradoProteico > 0 && <p>Concentrado: <span className="font-bold">{lastRacion.concentradoProteico} kg/an.</span></p>}
+                          <p className="font-bold text-stone-700 pt-1 border-t border-amber-200 mt-1">
+                            Total: {(lastRacion.siloMaiz + lastRacion.maizPartido + lastRacion.concentradoProteico).toFixed(1)} kg/an./día
+                          </p>
+                        </div>
                       </div>
                     ) : (
-                      <div className="space-y-3">
-                        {formData.events.sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
-                          <div key={event.id} className="p-4 bg-stone-50 rounded-lg border border-stone-100">
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <p className="text-xs text-stone-500 uppercase font-bold">{event.date}</p>
-                                <p className="font-bold text-stone-800">{event.type}</p>
-                                <p className="text-sm text-stone-600">{event.description}</p>
-                              </div>
-                              {isEditing && (
-                                <button
-                                  onClick={() => handleRemoveEvent(event.id)}
-                                  className="text-red-600 hover:text-red-700 p-1"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                      <div className="p-3 bg-stone-50 rounded-xl border border-dashed border-stone-200 text-center">
+                        <p className="text-xs text-stone-400">Sin raciones registradas aún</p>
                       </div>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
 
-            {/* Footer */}
-            <div className="p-6 border-t border-stone-100 bg-stone-50/50 space-y-3">
-              {saveError && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span className="text-sm text-red-700">{saveError}</span>
+                  {/* Footer actions */}
+                  <div className="px-5 pb-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
+                    <ActionBtn onClick={() => openRacion(tropa.id)} icon={<UtensilsCrossed className="w-4 h-4" />} label="Registrar Ración" variant="amber" />
+                    <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Pesaje" variant="blue" />
+                    {readyToSell && (
+                      <ActionBtn onClick={() => openVenta(tropa.id)} icon={<ShoppingCart className="w-4 h-4" />} label="Registrar Venta" variant="emerald" />
+                    )}
+                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
+                  </div>
                 </div>
-              )}
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={handleCloseModal}
-                  className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* ======== MODALS ======== */}
+
+      {/* Nueva / Editar Tropa */}
+      {isHerdOpen && (
+        <Modal
+          title={editingTropa ? `Editar: ${editingTropa.name}` : 'Nueva Tropa'}
+          onClose={() => setIsHerdOpen(false)}
+          onSave={saveHerd}
+          isSubmitting={isSubmitting}
+          error={modalError}
+        >
+          <div className="space-y-4">
+            {herdErrors.length > 0 && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl space-y-1">
+                {herdErrors.map((e, i) => (
+                  <p key={i} className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {e}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-sm font-bold text-stone-700">Nombre de la Tropa *</label>
+                <input
+                  type="text"
+                  value={herdForm.name}
+                  onChange={e => setHerdForm({ ...herdForm, name: e.target.value })}
+                  placeholder="Ej: Terneros Lote A"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Sexo *</label>
+                <select
+                  value={herdForm.sex}
+                  onChange={e => setHerdForm({ ...herdForm, sex: e.target.value as 'Macho' | 'Hembra' })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
-                  {!isEditing ? 'Cerrar' : 'Cancelar'}
-                </button>
-                {isEditing && (
-                  <div className="flex items-center gap-2">
-                    {showValidationErrors && validationErrors.length > 0 && (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
-                        <AlertCircle className="w-4 h-4 text-red-600" />
-                        <span className="text-xs font-bold text-red-600">{validationErrors.length} error{validationErrors.length > 1 ? 'es' : ''}</span>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSave}
-                      disabled={isSubmitting}
-                      className="px-10 py-2.5 font-bold rounded-xl transition-all bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSubmitting ? 'Guardando...' : 'Guardar'}
-                    </button>
-                  </div>
-                )}
+                  <option value="Macho">Macho</option>
+                  <option value="Hembra">Hembra</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Cantidad de Animales *</label>
+                <input
+                  type="number"
+                  value={herdForm.quantity}
+                  onChange={e => setHerdForm({ ...herdForm, quantity: e.target.value })}
+                  min="1"
+                  step="1"
+                  placeholder="Ej: 100"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Fecha de Ingreso al Campo *</label>
+                <input
+                  type="date"
+                  value={herdForm.entryDate}
+                  onChange={e => setHerdForm({ ...herdForm, entryDate: e.target.value })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Peso Promedio de Ingreso (kg) *</label>
+                <input
+                  type="number"
+                  value={herdForm.entryWeight}
+                  onChange={e => setHerdForm({ ...herdForm, entryWeight: e.target.value })}
+                  min="50"
+                  step="0.1"
+                  placeholder="Ej: 200"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <p className="text-xs text-stone-400">Los animales pasan a Terminación cuando alcanzan ≥ {CONFINEMENT_ENTRY_KG} kg.</p>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-sm font-bold text-stone-700">Notas</label>
+                <textarea
+                  value={herdForm.notes}
+                  onChange={e => setHerdForm({ ...herdForm, notes: e.target.value })}
+                  rows={3}
+                  placeholder="Observaciones adicionales..."
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                />
               </div>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Delete Confirmation */}
-      {isConfirmDeleteOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
-            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4 mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Confirmar eliminación</h3>
-            <p className="text-stone-600 mb-6 text-center">
-              ¿Estás seguro de eliminar esta tropa?
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={confirmDelete}
-                className="w-full py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700"
-              >
-                Eliminar
-              </button>
-              <button
-                onClick={() => setIsConfirmDeleteOpen(false)}
-                className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Merge Tropas Modal */}
-      {isMergeModalOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 mx-auto">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Mezclar Tropas</h3>
-            <p className="text-stone-600 mb-4 text-center text-sm">
-              Se mezclarán {selectedHerds.length} tropas en una nueva. Los animales se suman y el peso promedio se pondera.
-            </p>
-            <div className="mb-4 p-3 bg-stone-50 rounded-xl text-sm space-y-1">
-              {herds.filter(h => selectedHerds.includes(h.id)).map(h => (
-                <div key={h.id} className="flex justify-between text-stone-700">
-                  <span className="font-medium">{h.name}</span>
-                  <span>{h.quantity} animales · {h.weightPerAnimal} kg/an.</span>
-                </div>
-              ))}
-              <div className="border-t border-stone-200 pt-2 mt-2 flex justify-between font-bold text-stone-800">
-                <span>Total</span>
-                <span>
-                  {herds.filter(h => selectedHerds.includes(h.id)).reduce((s, h) => s + h.quantity, 0)} animales ·{' '}
-                  {(() => {
-                    const tropas = herds.filter(h => selectedHerds.includes(h.id));
-                    const total = tropas.reduce((s, h) => s + h.quantity, 0);
-                    return total > 0
-                      ? Math.round(tropas.reduce((s, h) => s + h.weightPerAnimal * h.quantity, 0) / total)
-                      : 0;
-                  })()} kg/an. prom.
-                </span>
+      {/* Registrar Pesaje */}
+      {isPesajeOpen && pesajeTropa && (
+        <Modal
+          title={`Registrar Pesaje — ${pesajeTropa.name}`}
+          onClose={() => setIsPesajeOpen(false)}
+          onSave={savePesaje}
+          isSubmitting={isSubmitting}
+          saveLabel="Guardar Pesaje"
+          error={modalError}
+          maxWidth="max-w-lg"
+        >
+          <div className="space-y-4">
+            {pesajeReadyForConf && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium text-amber-800">
+                  Con {pesajeNewWeight} kg esta tropa supera el umbral de {CONFINEMENT_ENTRY_KG} kg y está lista para pasar a Terminación en confinamiento.
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Fecha *</label>
+                <input
+                  type="date"
+                  value={pesajeForm.date}
+                  onChange={e => setPesajeForm({ ...pesajeForm, date: e.target.value })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Peso Promedio por Animal (kg) *</label>
+                <input
+                  type="number"
+                  value={pesajeForm.weight}
+                  onChange={e => setPesajeForm({ ...pesajeForm, weight: e.target.value })}
+                  min="50"
+                  step="0.1"
+                  placeholder="Ej: 380"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
               </div>
             </div>
-            <div className="mb-6 space-y-2">
-              <label className="text-sm font-bold text-stone-700">Nombre de la nueva tropa</label>
+            <div className="space-y-1">
+              <label className="text-sm font-bold text-stone-700">Notas</label>
               <input
                 type="text"
-                value={mergeName}
-                onChange={(e) => setMergeName(e.target.value)}
-                placeholder="Ej: Tropa Mezclada"
+                value={pesajeForm.notes}
+                onChange={e => setPesajeForm({ ...pesajeForm, notes: e.target.value })}
+                placeholder="Opcional..."
                 className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="p-3 bg-stone-50 rounded-xl text-sm text-stone-600 flex items-center gap-3">
+              <Scale className="w-4 h-4 text-stone-400 shrink-0" />
+              <span>Peso actual: <strong>{pesajeTropa.currentWeight} kg/animal</strong></span>
+              {pesajeNewWeight >= 50 && (
+                <span className={`font-bold ${pesajeNewWeight > pesajeTropa.currentWeight ? 'text-emerald-600' : 'text-red-600'}`}>
+                  → {pesajeNewWeight > pesajeTropa.currentWeight ? '+' : ''}{(pesajeNewWeight - pesajeTropa.currentWeight).toFixed(1)} kg
+                </span>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Pasar a Terminación */}
+      {isTerminacionOpen && (() => {
+        const tropa = tropas.find(t => t.id === terminacionTropaId);
+        if (!tropa) return null;
+        return (
+          <Modal
+            title="Pasar a Terminación en Confinamiento"
+            onClose={() => setIsTerminacionOpen(false)}
+            onSave={saveTerminacion}
+            isSubmitting={isSubmitting}
+            saveLabel="Confirmar Ingreso"
+            saveVariant="amber"
+            error={modalError}
+            maxWidth="max-w-md"
+          >
+            <div className="space-y-4">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                <p className="font-bold text-amber-900 text-lg">{tropa.name}</p>
+                <div className="grid grid-cols-2 gap-y-1.5 text-sm text-amber-800">
+                  <p><span className="font-medium">Animales:</span> {tropa.quantity}</p>
+                  <p><span className="font-medium">Sexo:</span> {tropa.sex}</p>
+                  <p><span className="font-medium">Peso actual:</span> {tropa.currentWeight} kg/an.</p>
+                  <p><span className="font-medium">Días en recría:</span> {getDaysIn(tropa)}</p>
+                </div>
+              </div>
+              <p className="text-sm text-stone-600 leading-relaxed">
+                Al confirmar, esta tropa ingresará al proceso de <strong>Terminación en confinamiento</strong>. Pasarás a registrar la ración diaria compuesta por silo picado de maíz, maíz partido y concentrado proteico pelleteado. La duración estimada del proceso es de <strong>{TERMINACION_TARGET_DAYS} días</strong>, hasta que los animales alcancen entre {SALE_WEIGHT_MIN_KG} y 500 kg.
+              </p>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Registrar Ración Diaria */}
+      {isRacionOpen && racionTropa && (
+        <Modal
+          title={`Registrar Ración Diaria — ${racionTropa.name}`}
+          onClose={() => setIsRacionOpen(false)}
+          onSave={saveRacion}
+          isSubmitting={isSubmitting}
+          saveLabel="Guardar Ración"
+          saveVariant="amber"
+          error={modalError}
+        >
+          <div className="space-y-5">
+            <div className="space-y-1">
+              <label className="text-sm font-bold text-stone-700">Fecha *</label>
+              <input
+                type="date"
+                value={racionForm.date}
+                onChange={e => setRacionForm({ ...racionForm, date: e.target.value })}
+                className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-sm font-bold text-stone-700 uppercase tracking-wider">Ingredientes — kg / animal / día</h4>
+
+              {/* Silo picado de maíz */}
+              <div className="p-4 bg-stone-50 rounded-xl space-y-2 border border-stone-100">
+                <p className="text-sm font-bold text-stone-800">Silo Picado de Maíz</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">kg / animal</label>
+                    <input
+                      type="number"
+                      value={racionForm.siloMaiz}
+                      onChange={e => setRacionForm({ ...racionForm, siloMaiz: e.target.value })}
+                      min="0" step="0.1" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">Precio / kg ($)</label>
+                    <input
+                      type="number"
+                      value={racionForm.precioSiloMaiz}
+                      onChange={e => setRacionForm({ ...racionForm, precioSiloMaiz: e.target.value })}
+                      min="0" step="0.01" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Maíz partido */}
+              <div className="p-4 bg-stone-50 rounded-xl space-y-2 border border-stone-100">
+                <p className="text-sm font-bold text-stone-800">Maíz Partido</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">kg / animal</label>
+                    <input
+                      type="number"
+                      value={racionForm.maizPartido}
+                      onChange={e => setRacionForm({ ...racionForm, maizPartido: e.target.value })}
+                      min="0" step="0.1" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">Precio / kg ($)</label>
+                    <input
+                      type="number"
+                      value={racionForm.precioMaizPartido}
+                      onChange={e => setRacionForm({ ...racionForm, precioMaizPartido: e.target.value })}
+                      min="0" step="0.01" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Concentrado proteico pelleteado */}
+              <div className="p-4 bg-stone-50 rounded-xl space-y-2 border border-stone-100">
+                <p className="text-sm font-bold text-stone-800">Concentrado Proteico Pelleteado</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">kg / animal</label>
+                    <input
+                      type="number"
+                      value={racionForm.concentradoProteico}
+                      onChange={e => setRacionForm({ ...racionForm, concentradoProteico: e.target.value })}
+                      min="0" step="0.1" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-stone-500">Precio / kg ($)</label>
+                    <input
+                      type="number"
+                      value={racionForm.precioConcentrado}
+                      onChange={e => setRacionForm({ ...racionForm, precioConcentrado: e.target.value })}
+                      min="0" step="0.01" placeholder="0"
+                      className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary */}
+            {rTotalPerAnimal > 0 && (
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Total kg / animal / día</p>
+                  <p className="text-2xl font-bold text-amber-700">{rTotalPerAnimal.toFixed(1)} kg</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Total herd / día ({racionTropa.quantity} an.)</p>
+                  <p className="text-2xl font-bold text-amber-700">{(rTotalPerAnimal * racionTropa.quantity).toFixed(0)} kg</p>
+                </div>
+                {rCostPerAnimal > 0 && (
+                  <>
+                    <div>
+                      <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Costo / animal / día</p>
+                      <p className="text-xl font-bold text-stone-800">${rCostPerAnimal.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Costo total / día</p>
+                      <p className="text-xl font-bold text-stone-800">${(rCostPerAnimal * racionTropa.quantity).toFixed(2)}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-sm font-bold text-stone-700">Notas</label>
+              <input
+                type="text"
+                value={racionForm.notes}
+                onChange={e => setRacionForm({ ...racionForm, notes: e.target.value })}
+                placeholder="Opcional..."
+                className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Registrar Venta / Faena */}
+      {isVentaOpen && ventaTropa && (
+        <Modal
+          title={`Registrar Venta / Faena — ${ventaTropa.name}`}
+          onClose={() => setIsVentaOpen(false)}
+          onSave={saveVenta}
+          isSubmitting={isSubmitting}
+          saveLabel="Confirmar Venta"
+          saveVariant="emerald"
+          error={modalError}
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Fecha *</label>
+                <input
+                  type="date"
+                  value={ventaForm.date}
+                  onChange={e => setVentaForm({ ...ventaForm, date: e.target.value })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Cantidad a Vender *</label>
+                <input
+                  type="number"
+                  value={ventaForm.quantity}
+                  onChange={e => setVentaForm({ ...ventaForm, quantity: e.target.value })}
+                  min="1"
+                  max={ventaTropa.quantity}
+                  step="1"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <p className="text-xs text-stone-400">Disponibles: {ventaTropa.quantity} animales</p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Peso al Momento de Venta (kg/an.) *</label>
+                <input
+                  type="number"
+                  value={ventaForm.weightAtSale}
+                  onChange={e => setVentaForm({ ...ventaForm, weightAtSale: e.target.value })}
+                  min="50"
+                  step="0.1"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Precio por kg ($)</label>
+                <input
+                  type="number"
+                  value={ventaForm.pricePerKg}
+                  onChange={e => setVentaForm({ ...ventaForm, pricePerKg: e.target.value })}
+                  min="0"
+                  step="0.01"
+                  placeholder="Opcional"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-sm font-bold text-stone-700">Notas</label>
+                <input
+                  type="text"
+                  value={ventaForm.notes}
+                  onChange={e => setVentaForm({ ...ventaForm, notes: e.target.value })}
+                  placeholder="Destino, frigorífico, etc."
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+
+            {vQty > 0 && vWeight > 0 && (
+              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Peso total vendido</p>
+                    <p className="text-xl font-bold text-emerald-700">{(vQty * vWeight).toLocaleString()} kg</p>
+                  </div>
+                  {vPxKg > 0 && (
+                    <div>
+                      <p className="text-xs font-bold text-stone-500 uppercase tracking-wider">Ingreso estimado</p>
+                      <p className="text-xl font-bold text-emerald-700">${vTotal.toLocaleString()}</p>
+                    </div>
+                  )}
+                </div>
+                {vQty >= ventaTropa.quantity && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-emerald-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <p className="text-xs font-semibold text-amber-700">Se venderán todos los animales. La tropa será eliminada del sistema.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Historial */}
+      {isHistorialOpen && historialTropa && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-stone-100 flex justify-between items-center bg-stone-50/50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-stone-900">Historial — {historialTropa.name}</h3>
+                  <p className="text-xs text-stone-500">{historialTropa.sex} · {historialTropa.quantity} animales · {historialTropa.status}</p>
+                </div>
+              </div>
+              <button onClick={() => setIsHistorialOpen(false)} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
+                <X className="w-5 h-5 text-stone-400" />
+              </button>
+            </div>
+
+            <div className="flex border-b border-stone-100 shrink-0">
               <button
-                onClick={handleMergeTropas}
-                disabled={!mergeName.trim() || isSubmitting}
-                className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => setHistorialTab('eventos')}
+                className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${historialTab === 'eventos' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
               >
-                {isSubmitting ? 'Mezclando...' : 'Confirmar Mezcla'}
+                Eventos ({(historialTropa.events || []).length})
               </button>
               <button
-                onClick={() => { setIsMergeModalOpen(false); setMergeName(''); }}
+                onClick={() => setHistorialTab('raciones')}
+                className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${historialTab === 'raciones' ? 'border-amber-600 text-amber-600' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
+              >
+                Raciones ({(historialTropa.raciones || []).length})
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {historialTab === 'eventos' ? (
+                (historialTropa.events || []).length === 0 ? (
+                  <div className="text-center py-8 text-stone-400">
+                    <Activity className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p>Sin eventos registrados</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {[...(historialTropa.events || [])].sort((a, b) => b.date.localeCompare(a.date)).map(ev => (
+                      <div key={ev.id} className="p-4 bg-stone-50 rounded-xl border border-stone-100">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <p className="text-xs text-stone-400 font-medium">{ev.date}</p>
+                            <p className="font-bold text-stone-800 mt-0.5">{ev.type}</p>
+                            {ev.description && <p className="text-sm text-stone-600 mt-0.5">{ev.description}</p>}
+                            {ev.weightPerAnimal && ev.type === 'Pesaje' && (
+                              <p className="text-sm font-bold text-blue-600 mt-1">{ev.weightPerAnimal} kg/animal</p>
+                            )}
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                            ev.type === 'Pesaje' ? 'bg-blue-100 text-blue-700' :
+                            ev.type === 'Medicación' ? 'bg-purple-100 text-purple-700' :
+                            ev.type === 'Traslado' ? 'bg-amber-100 text-amber-700' :
+                            ev.type === 'Control Veterinario' ? 'bg-pink-100 text-pink-700' :
+                            'bg-stone-100 text-stone-600'
+                          }`}>
+                            {ev.type}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                (historialTropa.raciones || []).length === 0 ? (
+                  <div className="text-center py-8 text-stone-400">
+                    <UtensilsCrossed className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p>Sin raciones registradas</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {[...(historialTropa.raciones || [])].sort((a, b) => b.date.localeCompare(a.date)).map(r => {
+                      const total = r.siloMaiz + r.maizPartido + r.concentradoProteico;
+                      const cost = getRacionCostPerAnimal(r);
+                      return (
+                        <div key={r.id} className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                          <p className="text-xs text-stone-500 font-medium mb-2">{r.date}</p>
+                          <div className="grid grid-cols-3 gap-2 text-sm mb-2">
+                            <div>
+                              <p className="text-xs text-stone-500">Silo maíz</p>
+                              <p className="font-bold text-stone-700">{r.siloMaiz} kg/an.</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-stone-500">Maíz partido</p>
+                              <p className="font-bold text-stone-700">{r.maizPartido} kg/an.</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-stone-500">Concentrado</p>
+                              <p className="font-bold text-stone-700">{r.concentradoProteico} kg/an.</p>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-amber-200">
+                            <span className="text-sm font-bold text-stone-700">Total: {total.toFixed(1)} kg/an./día</span>
+                            {cost > 0 && <span className="text-sm font-bold text-amber-700">${cost.toFixed(2)}/an./día</span>}
+                          </div>
+                          {r.notes && <p className="text-xs text-stone-500 mt-1">{r.notes}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirm */}
+      {isDeleteOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-stone-900 mb-2">Eliminar Tropa</h3>
+            <p className="text-stone-500 text-sm mb-6">Esta acción eliminará la tropa con todos sus eventos y raciones. No se puede deshacer.</p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={confirmDelete}
+                disabled={isSubmitting}
+                className="w-full py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 disabled:opacity-50"
+              >
+                {isSubmitting ? 'Eliminando...' : 'Eliminar'}
+              </button>
+              <button
+                onClick={() => { setIsDeleteOpen(false); setDeleteId(null); }}
                 className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl"
               >
                 Cancelar
@@ -1030,178 +1307,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           </div>
         </div>
       )}
-
-      {/* Diet Management Modal */}
-      {isDietModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Header */}
-            <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-100 text-amber-700 rounded-lg">
-                  <UtensilsCrossed className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-stone-900">Gestionar Dietas</h3>
-                  <p className="text-sm text-stone-500">Tropas en Engorde</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsDietModalOpen(false)}
-                className="p-2 hover:bg-stone-200 rounded-full transition-colors"
-              >
-                <X className="w-6 h-6 text-stone-400" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 bg-white space-y-6">
-              {/* Herd selector */}
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-stone-700">Seleccionar Tropa</label>
-                <select
-                  value={dietHerdId}
-                  onChange={(e) => handleDietHerdChange(e.target.value)}
-                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
-                >
-                  {herds.filter(h => h.status === 'Engorde').map(h => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {dietHerdId && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-stone-700">Nombre de la Dieta</label>
-                    <input
-                      type="text"
-                      value={dietForm.name}
-                      onChange={(e) => setDietForm({ ...dietForm, name: e.target.value })}
-                      className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
-                      placeholder="Ej: Dieta Terminación"
-                    />
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <h4 className="font-bold text-stone-800">Insumos</h4>
-                      <button
-                        type="button"
-                        onClick={handleAddDietIngredient}
-                        className="text-amber-600 hover:text-amber-700 font-medium text-sm"
-                      >
-                        + Agregar Insumo
-                      </button>
-                    </div>
-
-                    {dietForm.ingredients.length === 0 ? (
-                      <p className="text-stone-400 text-sm">Sin insumos registrados</p>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-4 gap-2 px-3 text-xs font-bold text-stone-500 uppercase">
-                          <span>Tipo</span>
-                          <span>kg/día</span>
-                          <span>Precio/kg</span>
-                          <span>Total</span>
-                        </div>
-                        {dietForm.ingredients.map((ing, idx) => (
-                          <div key={idx} className="grid grid-cols-4 gap-2 p-3 bg-stone-50 rounded-lg">
-                            <input
-                              type="text"
-                              list="ingredients-list"
-                              value={ing.type}
-                              onChange={(e) => handleUpdateDietIngredient(idx, 'type', e.target.value)}
-                              placeholder="Tipo"
-                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                            <input
-                              type="number"
-                              value={ing.kg}
-                              onChange={(e) => handleUpdateDietIngredient(idx, 'kg', e.target.value)}
-                              placeholder="kg"
-                              min="0"
-                              step="0.1"
-                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                            <input
-                              type="number"
-                              value={ing.pricePerKg}
-                              onChange={(e) => handleUpdateDietIngredient(idx, 'pricePerKg', e.target.value)}
-                              placeholder="$/kg"
-                              min="0"
-                              step="0.01"
-                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-bold text-stone-700">${ing.totalPrice.toFixed(2)}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveDietIngredient(idx)}
-                                className="text-red-500 hover:text-red-700 p-1"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {dietForm.ingredients.length > 0 && (
-                      <div className="mt-2 p-4 bg-amber-50 rounded-xl border border-amber-100">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-xs text-stone-600 uppercase font-bold">Total kg/día</p>
-                            <p className="text-2xl font-bold text-amber-700">
-                              {calculateDietCosts(dietForm.ingredients).totalKg.toFixed(2)} kg
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-stone-600 uppercase font-bold">Costo/día</p>
-                            <p className="text-2xl font-bold text-amber-700">
-                              ${calculateDietCosts(dietForm.ingredients).totalPrice.toFixed(2)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-6 border-t border-stone-100 bg-stone-50/50 space-y-3">
-              {saveError && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span className="text-sm text-red-700">{saveError}</span>
-                </div>
-              )}
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setIsDietModalOpen(false)}
-                  className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSaveDiet}
-                  disabled={isSubmitting || !dietHerdId}
-                  className="px-10 py-2.5 font-bold rounded-xl transition-all bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? 'Guardando...' : 'Guardar Dieta'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <datalist id="ingredients-list">
-        {INGREDIENTS.map(ing => <option key={ing.name} value={ing.name} />)}
-      </datalist>
     </div>
   );
 }

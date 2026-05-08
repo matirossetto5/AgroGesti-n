@@ -21,8 +21,8 @@ export function AdvancedFilters({
   onFiltersChange,
   onReset
 }: AdvancedFiltersProps) {
-  const STATUSES = ['Recría', 'Engorde'];
-  const SEXES = ['Macho', 'Hembra', 'Mixto'];
+  const STATUSES = ['Recría', 'Terminación'];
+  const SEXES = ['Macho', 'Hembra'];
 
   const handleStatusToggle = (status: string) => {
     const newStatuses = filters.status.includes(status)
