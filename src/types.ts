@@ -1,7 +1,7 @@
 export interface TropaEvent {
   id: string;
   date: string;
-  type: 'Pesaje' | 'Medicación' | 'Control Veterinario' | 'Traslado' | 'Otro';
+  type: 'Pesaje' | 'Medicación' | 'Control Veterinario' | 'Traslado' | 'Baja' | 'Compra' | 'Otro';
   description?: string;
   weightPerAnimal?: number;
   quantity?: number;

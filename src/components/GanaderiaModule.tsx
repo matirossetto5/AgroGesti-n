@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  Plus, Edit2, Trash2, Search, Scale, X, History,
+  Plus, PlusCircle, MinusCircle, Edit2, Trash2, Search, Scale, X, History,
   TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed,
   ArrowRight, ShoppingCart, Activity, CheckCircle, Clock,
   Users
@@ -154,6 +154,17 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   // Terminación modal
   const [isTerminacionOpen, setIsTerminacionOpen] = useState(false);
   const [terminacionTropaId, setTerminacionTropaId] = useState('');
+  const [terminacionForm, setTerminacionForm] = useState({ quantity: '', weight: '', newName: '' });
+
+  // Baja modal
+  const [isBajaOpen, setIsBajaOpen] = useState(false);
+  const [bajaTropaId, setBajaTropaId] = useState('');
+  const [bajaForm, setBajaForm] = useState({ date: '', quantity: '', notes: '' });
+
+  // Agregar animales modal
+  const [isAgregarOpen, setIsAgregarOpen] = useState(false);
+  const [agregarTropaId, setAgregarTropaId] = useState('');
+  const [agregarForm, setAgregarForm] = useState({ date: '', quantity: '', weight: '', notes: '' });
 
   // Ración modal
   const [isRacionOpen, setIsRacionOpen] = useState(false);
@@ -333,32 +344,159 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   };
 
   const openTerminacion = (tropaId: string) => {
+    const tropa = tropas.find(t => t.id === tropaId)!;
     setTerminacionTropaId(tropaId);
+    setTerminacionForm({
+      quantity: tropa.quantity.toString(),
+      weight: tropa.currentWeight.toString(),
+      newName: `${tropa.name} - Terminación`,
+    });
     setModalError(null);
     setIsTerminacionOpen(true);
   };
 
   const saveTerminacion = async () => {
+    const tropa = tropas.find(t => t.id === terminacionTropaId)!;
+    const qty = Number(terminacionForm.quantity);
+    const weight = Number(terminacionForm.weight);
+    if (!qty || qty < 1 || !Number.isInteger(qty) || qty > tropa.quantity) {
+      setModalError(`Cantidad inválida (mínimo 1, máximo ${tropa.quantity} animales).`);
+      return;
+    }
+    if (!weight || weight < 50) { setModalError('Peso inválido (mínimo 50 kg).'); return; }
     setIsSubmitting(true);
     setModalError(null);
     try {
-      const tropa = tropas.find(t => t.id === terminacionTropaId)!;
-      const event: TropaEvent = {
+      const eventRecria: TropaEvent = {
         id: Date.now().toString(),
         date: today,
         type: 'Traslado',
-        description: `Ingreso a confinamiento (Terminación). Peso promedio: ${tropa.currentWeight} kg/animal. Días en recría: ${getDaysIn(tropa)}.`,
+        description: `${qty} animales enviados a Terminación a ${weight} kg/an. promedio.`,
+        quantity: qty,
+        weightPerAnimal: weight,
       };
-      await updateDoc(doc(db, `farms/${farmId}/herds`, terminacionTropaId), {
+      const eventTerm: TropaEvent = {
+        id: (Date.now() + 1).toString(),
+        date: today,
+        type: 'Traslado',
+        description: `Ingreso a confinamiento desde recría. ${qty} animales a ${weight} kg/an. Días en recría: ${getDaysIn(tropa)}.`,
+        quantity: qty,
+        weightPerAnimal: weight,
+      };
+      const batch = writeBatch(db);
+      const remainingQty = tropa.quantity - qty;
+      if (remainingQty <= 0) {
+        batch.delete(doc(db, `farms/${farmId}/herds`, terminacionTropaId));
+      } else {
+        batch.update(doc(db, `farms/${farmId}/herds`, terminacionTropaId), {
+          quantity: remainingQty,
+          events: [eventRecria, ...(tropa.events || [])],
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      const newRef = doc(collection(db, `farms/${farmId}/herds`));
+      batch.set(newRef, {
+        name: terminacionForm.newName.trim() || `${tropa.name} - Terminación`,
+        sex: tropa.sex,
+        quantity: qty,
+        entryDate: tropa.entryDate,
+        entryWeight: weight,
+        currentWeight: weight,
         status: 'Terminación',
         terminationStartDate: today,
-        events: [event, ...(tropa.events || [])],
+        events: [eventTerm],
+        raciones: [],
+        notes: '',
+        createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
+      await batch.commit();
       setIsTerminacionOpen(false);
       setActiveTab('terminacion');
     } catch (e: any) {
       setModalError(e?.message || 'Error al mover a terminación.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openBaja = (tropaId: string) => {
+    setBajaTropaId(tropaId);
+    setBajaForm({ date: today, quantity: '', notes: '' });
+    setModalError(null);
+    setIsBajaOpen(true);
+  };
+
+  const saveBaja = async () => {
+    const tropa = tropas.find(t => t.id === bajaTropaId)!;
+    const qty = Number(bajaForm.quantity);
+    if (!qty || qty < 1 || !Number.isInteger(qty) || qty > tropa.quantity) {
+      setModalError(`Cantidad inválida (mínimo 1, máximo ${tropa.quantity} animales).`);
+      return;
+    }
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const event: TropaEvent = {
+        id: Date.now().toString(),
+        date: bajaForm.date,
+        type: 'Baja',
+        description: `Baja de ${qty} animal${qty > 1 ? 'es' : ''}.${bajaForm.notes ? ' ' + bajaForm.notes : ''}`,
+        quantity: qty,
+      };
+      const remaining = tropa.quantity - qty;
+      if (remaining <= 0) {
+        await deleteDoc(doc(db, `farms/${farmId}/herds`, bajaTropaId));
+      } else {
+        await updateDoc(doc(db, `farms/${farmId}/herds`, bajaTropaId), {
+          quantity: remaining,
+          events: [event, ...(tropa.events || [])],
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      setIsBajaOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al registrar baja.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openAgregar = (tropaId: string) => {
+    setAgregarTropaId(tropaId);
+    setAgregarForm({ date: today, quantity: '', weight: '', notes: '' });
+    setModalError(null);
+    setIsAgregarOpen(true);
+  };
+
+  const saveAgregar = async () => {
+    const qty = Number(agregarForm.quantity);
+    const weight = Number(agregarForm.weight);
+    if (!qty || qty < 1 || !Number.isInteger(qty)) { setModalError('Cantidad inválida (mínimo 1 animal, entero).'); return; }
+    if (!weight || weight < 50) { setModalError('Peso inválido (mínimo 50 kg).'); return; }
+    setIsSubmitting(true);
+    setModalError(null);
+    try {
+      const tropa = tropas.find(t => t.id === agregarTropaId)!;
+      const newQty = tropa.quantity + qty;
+      const newWeight = Math.round(((tropa.currentWeight * tropa.quantity + weight * qty) / newQty) * 10) / 10;
+      const event: TropaEvent = {
+        id: Date.now().toString(),
+        date: agregarForm.date,
+        type: 'Compra',
+        description: `Ingreso de ${qty} animales a ${weight} kg/an. Nuevo total: ${newQty} animales, promedio: ${newWeight} kg/an.${agregarForm.notes ? ' · ' + agregarForm.notes : ''}`,
+        quantity: qty,
+        weightPerAnimal: weight,
+      };
+      await updateDoc(doc(db, `farms/${farmId}/herds`, agregarTropaId), {
+        quantity: newQty,
+        currentWeight: newWeight,
+        events: [event, ...(tropa.events || [])],
+        updatedAt: new Date().toISOString(),
+      });
+      setIsAgregarOpen(false);
+    } catch (e: any) {
+      setModalError(e?.message || 'Error al agregar animales.');
     } finally {
       setIsSubmitting(false);
     }
@@ -389,7 +527,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         precioSiloMaiz: Number(racionForm.precioSiloMaiz) || 0,
         precioMaizPartido: Number(racionForm.precioMaizPartido) || 0,
         precioConcentrado: Number(racionForm.precioConcentrado) || 0,
-        notes: racionForm.notes || undefined,
+        notes: racionForm.notes,
       };
       await updateDoc(doc(db, `farms/${farmId}/herds`, racionTropaId), {
         raciones: [racion, ...(tropa.raciones || [])],
@@ -485,6 +623,20 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const vWeight = Number(ventaForm.weightAtSale) || 0;
   const vPxKg = Number(ventaForm.pricePerKg) || 0;
   const vTotal = vQty * vWeight * vPxKg;
+
+  // Computed values for terminación modal
+  const terminacionTropaData = tropas.find(t => t.id === terminacionTropaId);
+  const tQty = Number(terminacionForm.quantity) || 0;
+  const tWeight = Number(terminacionForm.weight) || 0;
+
+  // Computed values for agregar modal
+  const agregarTropaData = tropas.find(t => t.id === agregarTropaId);
+  const aQty = Number(agregarForm.quantity) || 0;
+  const aWeight = Number(agregarForm.weight) || 0;
+  const aNewQty = agregarTropaData ? agregarTropaData.quantity + aQty : 0;
+  const aNewWeight = (agregarTropaData && aQty > 0 && aWeight >= 50)
+    ? Math.round(((agregarTropaData.currentWeight * agregarTropaData.quantity + aWeight * aQty) / aNewQty) * 10) / 10
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -621,7 +773,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
                   {/* Footer actions */}
                   <div className="px-5 pb-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
-                    <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Registrar Pesaje" variant="blue" />
+                    <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Pesaje" variant="blue" />
+                    <ActionBtn onClick={() => openAgregar(tropa.id)} icon={<PlusCircle className="w-4 h-4" />} label="Agregar Animales" variant="ghost" />
+                    <ActionBtn onClick={() => openBaja(tropa.id)} icon={<MinusCircle className="w-4 h-4" />} label="Baja" variant="ghost" />
                     {ready && (
                       <ActionBtn onClick={() => openTerminacion(tropa.id)} icon={<ArrowRight className="w-4 h-4" />} label="Pasar a Terminación" variant="amber" />
                     )}
@@ -722,9 +876,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   <div className="px-5 pb-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
                     <ActionBtn onClick={() => openRacion(tropa.id)} icon={<UtensilsCrossed className="w-4 h-4" />} label="Registrar Ración" variant="amber" />
                     <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Pesaje" variant="blue" />
-                    {readyToSell && (
-                      <ActionBtn onClick={() => openVenta(tropa.id)} icon={<ShoppingCart className="w-4 h-4" />} label="Registrar Venta" variant="emerald" />
-                    )}
+                    <ActionBtn onClick={() => openVenta(tropa.id)} icon={<ShoppingCart className="w-4 h-4" />} label="Registrar Venta" variant={readyToSell ? 'emerald' : 'ghost'} />
+                    <ActionBtn onClick={() => openBaja(tropa.id)} icon={<MinusCircle className="w-4 h-4" />} label="Baja" variant="ghost" />
                     <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
                   </div>
                 </div>
@@ -893,37 +1046,72 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       )}
 
       {/* Pasar a Terminación */}
-      {isTerminacionOpen && (() => {
-        const tropa = tropas.find(t => t.id === terminacionTropaId);
-        if (!tropa) return null;
-        return (
-          <Modal
-            title="Pasar a Terminación en Confinamiento"
-            onClose={() => setIsTerminacionOpen(false)}
-            onSave={saveTerminacion}
-            isSubmitting={isSubmitting}
-            saveLabel="Confirmar Ingreso"
-            saveVariant="amber"
-            error={modalError}
-            maxWidth="max-w-md"
-          >
-            <div className="space-y-4">
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-                <p className="font-bold text-amber-900 text-lg">{tropa.name}</p>
-                <div className="grid grid-cols-2 gap-y-1.5 text-sm text-amber-800">
-                  <p><span className="font-medium">Animales:</span> {tropa.quantity}</p>
-                  <p><span className="font-medium">Sexo:</span> {tropa.sex}</p>
-                  <p><span className="font-medium">Peso actual:</span> {tropa.currentWeight} kg/an.</p>
-                  <p><span className="font-medium">Días en recría:</span> {getDaysIn(tropa)}</p>
-                </div>
+      {isTerminacionOpen && terminacionTropaData && (
+        <Modal
+          title="Pasar a Terminación en Confinamiento"
+          onClose={() => setIsTerminacionOpen(false)}
+          onSave={saveTerminacion}
+          isSubmitting={isSubmitting}
+          saveLabel="Confirmar Ingreso"
+          saveVariant="amber"
+          error={modalError}
+        >
+          <div className="space-y-4">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="font-bold text-amber-900 mb-2">{terminacionTropaData.name}</p>
+              <div className="grid grid-cols-2 gap-y-1 text-sm text-amber-800">
+                <p><span className="font-medium">Disponibles:</span> {terminacionTropaData.quantity} animales</p>
+                <p><span className="font-medium">Peso actual:</span> {terminacionTropaData.currentWeight} kg/an.</p>
               </div>
-              <p className="text-sm text-stone-600 leading-relaxed">
-                Al confirmar, esta tropa ingresará al proceso de <strong>Terminación en confinamiento</strong>. Pasarás a registrar la ración diaria compuesta por silo picado de maíz, maíz partido y concentrado proteico pelleteado. La duración estimada del proceso es de <strong>{TERMINACION_TARGET_DAYS} días</strong>, hasta que los animales alcancen entre {SALE_WEIGHT_MIN_KG} y 500 kg.
-              </p>
             </div>
-          </Modal>
-        );
-      })()}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Cantidad a trasladar *</label>
+                <input
+                  type="number"
+                  value={terminacionForm.quantity}
+                  onChange={e => setTerminacionForm({ ...terminacionForm, quantity: e.target.value })}
+                  min="1"
+                  max={terminacionTropaData.quantity}
+                  step="1"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+                <p className="text-xs text-stone-400">Máximo: {terminacionTropaData.quantity} animales</p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Peso promedio al traslado (kg/an.) *</label>
+                <input
+                  type="number"
+                  value={terminacionForm.weight}
+                  onChange={e => setTerminacionForm({ ...terminacionForm, weight: e.target.value })}
+                  min="50"
+                  step="0.1"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-sm font-bold text-stone-700">Nombre del nuevo grupo en Terminación</label>
+                <input
+                  type="text"
+                  value={terminacionForm.newName}
+                  onChange={e => setTerminacionForm({ ...terminacionForm, newName: e.target.value })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+            </div>
+            {tQty > 0 && tWeight >= 50 && (
+              <div className="p-3 bg-stone-50 rounded-xl text-sm text-stone-600 space-y-1">
+                {tQty < terminacionTropaData.quantity ? (
+                  <p>Quedarán en recría: <strong>{terminacionTropaData.quantity - tQty} animales</strong></p>
+                ) : (
+                  <p className="text-amber-700 font-semibold">Se trasladarán todos los animales. El grupo de recría quedará vacío.</p>
+                )}
+                <p className="text-xs text-stone-400">La ración diaria se registra por separado para el nuevo grupo de terminación.</p>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {/* Registrar Ración Diaria */}
       {isRacionOpen && racionTropa && (
@@ -1227,6 +1415,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                             ev.type === 'Medicación' ? 'bg-purple-100 text-purple-700' :
                             ev.type === 'Traslado' ? 'bg-amber-100 text-amber-700' :
                             ev.type === 'Control Veterinario' ? 'bg-pink-100 text-pink-700' :
+                            ev.type === 'Baja' ? 'bg-red-100 text-red-700' :
+                            ev.type === 'Compra' ? 'bg-emerald-100 text-emerald-700' :
                             'bg-stone-100 text-stone-600'
                           }`}>
                             {ev.type}
@@ -1278,6 +1468,151 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Registrar Baja */}
+      {isBajaOpen && (() => {
+        const tropa = tropas.find(t => t.id === bajaTropaId);
+        if (!tropa) return null;
+        const bajaQty = Number(bajaForm.quantity) || 0;
+        return (
+          <Modal
+            title={`Registrar Baja — ${tropa.name}`}
+            onClose={() => setIsBajaOpen(false)}
+            onSave={saveBaja}
+            isSubmitting={isSubmitting}
+            saveLabel="Confirmar Baja"
+            saveVariant="red"
+            error={modalError}
+            maxWidth="max-w-md"
+          >
+            <div className="space-y-4">
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p>Registrá los animales fallecidos. Se descontarán del total de la tropa.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-bold text-stone-700">Fecha *</label>
+                  <input
+                    type="date"
+                    value={bajaForm.date}
+                    onChange={e => setBajaForm({ ...bajaForm, date: e.target.value })}
+                    className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-bold text-stone-700">Cantidad de bajas *</label>
+                  <input
+                    type="number"
+                    value={bajaForm.quantity}
+                    onChange={e => setBajaForm({ ...bajaForm, quantity: e.target.value })}
+                    min="1"
+                    max={tropa.quantity}
+                    step="1"
+                    className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none"
+                  />
+                  <p className="text-xs text-stone-400">Actuales: {tropa.quantity} animales</p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Causa / Notas</label>
+                <input
+                  type="text"
+                  value={bajaForm.notes}
+                  onChange={e => setBajaForm({ ...bajaForm, notes: e.target.value })}
+                  placeholder="Enfermedad, accidente, etc."
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none"
+                />
+              </div>
+              {bajaQty > 0 && bajaQty <= tropa.quantity && (
+                <div className="p-3 bg-stone-50 rounded-xl text-sm text-stone-600">
+                  {bajaQty >= tropa.quantity
+                    ? <span className="text-amber-700 font-semibold">Se eliminarán todos los animales. La tropa será eliminada.</span>
+                    : <span>Quedarán <strong>{tropa.quantity - bajaQty} animales</strong> en la tropa.</span>
+                  }
+                </div>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Agregar Animales */}
+      {isAgregarOpen && agregarTropaData && (
+        <Modal
+          title={`Agregar Animales — ${agregarTropaData.name}`}
+          onClose={() => setIsAgregarOpen(false)}
+          onSave={saveAgregar}
+          isSubmitting={isSubmitting}
+          saveLabel="Confirmar Ingreso"
+          error={modalError}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="p-3 bg-stone-50 rounded-xl text-sm text-stone-600 flex items-center gap-2">
+              <Users className="w-4 h-4 text-stone-400 shrink-0" />
+              <p>Actual: <strong>{agregarTropaData.quantity} animales</strong> · <strong>{agregarTropaData.currentWeight} kg/an.</strong> promedio</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Fecha de ingreso *</label>
+                <input
+                  type="date"
+                  value={agregarForm.date}
+                  onChange={e => setAgregarForm({ ...agregarForm, date: e.target.value })}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Cantidad a agregar *</label>
+                <input
+                  type="number"
+                  value={agregarForm.quantity}
+                  onChange={e => setAgregarForm({ ...agregarForm, quantity: e.target.value })}
+                  min="1"
+                  step="1"
+                  placeholder="Ej: 50"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Peso promedio (kg/an.) *</label>
+                <input
+                  type="number"
+                  value={agregarForm.weight}
+                  onChange={e => setAgregarForm({ ...agregarForm, weight: e.target.value })}
+                  min="50"
+                  step="0.1"
+                  placeholder="Ej: 200"
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-stone-700">Notas</label>
+                <input
+                  type="text"
+                  value={agregarForm.notes}
+                  onChange={e => setAgregarForm({ ...agregarForm, notes: e.target.value })}
+                  placeholder="Origen, lote, remito, etc."
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+            {aQty > 0 && aWeight >= 50 && (
+              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-stone-500 uppercase font-bold tracking-wider">Nuevo total</p>
+                  <p className="text-xl font-bold text-stone-800">{aNewQty} animales</p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500 uppercase font-bold tracking-wider">Nuevo peso prom.</p>
+                  <p className="text-xl font-bold text-stone-800">{aNewWeight} kg/an.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* Delete Confirm */}
