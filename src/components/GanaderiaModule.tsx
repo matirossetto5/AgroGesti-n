@@ -651,7 +651,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               >
                 Detalles
               </button>
-              {formData.status === 'Engorde' && (
+              {editingHerd && formData.status === 'Engorde' && (
                 <button
                   onClick={() => setModalTab('diet')}
                   className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
@@ -661,14 +661,16 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   Dieta
                 </button>
               )}
-              <button
-                onClick={() => setModalTab('history')}
-                className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
-                  modalTab === 'history' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
-                }`}
-              >
-                Historial
-              </button>
+              {editingHerd && (
+                <button
+                  onClick={() => setModalTab('history')}
+                  className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
+                    modalTab === 'history' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
+                  }`}
+                >
+                  Historial
+                </button>
+              )}
             </div>
 
             {/* Content */}
