@@ -47,6 +47,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   });
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [mergeName, setMergeName] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -146,6 +147,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     setValidationErrors([]);
     setValidationWarnings([]);
     setShowValidationErrors(false);
+    setSaveError(null);
   };
 
   const validateForm = () => {
@@ -252,48 +254,41 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   };
 
   const handleSave = async () => {
-    if (!isEditing) return;
-    if (!validateForm()) return;
-    await saveHerd();
-  };
+    setSaveError(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await handleSave();
-  };
+    // Validar
+    const isValid = validateForm();
+    if (!isValid) return;
 
-  const saveHerd = async () => {
     setIsSubmitting(true);
-    const qty = Number(formData.quantity) || 0;
-    const weightPer = Number(formData.weightPerAnimal) || 0;
-    const totalWeight = calculateTotalWeight(qty, weightPer);
-
-    const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
-
-    const herdData = {
-      name: formData.name,
-      sex: formData.sex,
-      quantity: qty,
-      weightPerAnimal: weightPer,
-      totalWeight,
-      status: formData.status,
-      stage: formData.stage,
-      notes: formData.notes,
-      events: formData.events,
-      feedingPlan: formData.status === 'Engorde' && dietForm.ingredients.length > 0 ? {
-        id: editingHerd?.feedingPlan?.id || Date.now().toString(),
-        herdId: editingHerd?.id || '',
-        name: dietForm.name,
-        ingredients: dietForm.ingredients,
-        totalKgPerDay: totalKg,
-        totalCostPerDay: totalPrice,
-        createdAt: editingHerd?.feedingPlan?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      } : undefined,
-      updatedAt: new Date().toISOString()
-    };
-
     try {
+      const qty = Number(formData.quantity) || 0;
+      const weightPer = Number(formData.weightPerAnimal) || 0;
+      const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
+
+      const herdData = {
+        name: formData.name.trim(),
+        sex: formData.sex,
+        quantity: qty,
+        weightPerAnimal: weightPer,
+        totalWeight: qty * weightPer,
+        status: formData.status,
+        stage: formData.stage,
+        notes: formData.notes,
+        events: formData.events,
+        feedingPlan: formData.status === 'Engorde' && dietForm.ingredients.length > 0 ? {
+          id: editingHerd?.feedingPlan?.id || Date.now().toString(),
+          herdId: editingHerd?.id || '',
+          name: dietForm.name,
+          ingredients: dietForm.ingredients,
+          totalKgPerDay: totalKg,
+          totalCostPerDay: totalPrice,
+          createdAt: editingHerd?.feedingPlan?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } : null,
+        updatedAt: new Date().toISOString()
+      };
+
       if (editingHerd) {
         await updateDoc(doc(db, `farms/${farmId}/herds`, editingHerd.id), herdData);
       } else {
@@ -303,8 +298,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         });
       }
       handleCloseModal();
-    } catch (error) {
-      handleFirestoreError(error, editingHerd ? 'update' : 'create', `farms/${farmId}/herds`, auth);
+    } catch (error: any) {
+      console.error('Error guardando tropa:', error);
+      setSaveError(error?.message || 'Error al guardar. Verificá tu conexión e intentá de nuevo.');
     } finally {
       setIsSubmitting(false);
     }
@@ -678,7 +674,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 bg-white">
               {modalTab === 'details' ? (
-                <form id="herd-form" onSubmit={handleSubmit} noValidate>
+                <div>
                   {validationErrors.length > 0 && (
                     <div className="mb-6">
                       <ValidationMessage
@@ -796,7 +792,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       </div>
                     )}
                   </fieldset>
-                </form>
+                </div>
               ) : modalTab === 'diet' ? (
                 <div className="space-y-6">
                   <div className="space-y-4">
@@ -980,35 +976,39 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             </div>
 
             {/* Footer */}
-            <div className="p-6 border-t border-stone-100 flex justify-end gap-3 bg-stone-50/50">
-              <button
-                onClick={handleCloseModal}
-                className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
-              >
-                {!isEditing ? 'Cerrar' : 'Cancelar'}
-              </button>
-              {isEditing && (
-                <div className="flex items-center gap-2">
-                  {validationErrors.length > 0 && (
-                    <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
-                      <AlertCircle className="w-4 h-4 text-red-600" />
-                      <span className="text-xs font-bold text-red-600">{validationErrors.length} error{validationErrors.length > 1 ? 'es' : ''}</span>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={isSubmitting || (showValidationErrors && validationErrors.length > 0)}
-                    className={`px-10 py-2.5 font-bold rounded-xl transition-all ${
-                      showValidationErrors && validationErrors.length > 0
-                        ? 'bg-stone-300 text-stone-500 cursor-not-allowed'
-                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                    } disabled:opacity-50`}
-                  >
-                    {isSubmitting ? 'Guardando...' : 'Guardar'}
-                  </button>
+            <div className="p-6 border-t border-stone-100 bg-stone-50/50 space-y-3">
+              {saveError && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span className="text-sm text-red-700">{saveError}</span>
                 </div>
               )}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={handleCloseModal}
+                  className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
+                >
+                  {!isEditing ? 'Cerrar' : 'Cancelar'}
+                </button>
+                {isEditing && (
+                  <div className="flex items-center gap-2">
+                    {showValidationErrors && validationErrors.length > 0 && (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-red-50 rounded-lg">
+                        <AlertCircle className="w-4 h-4 text-red-600" />
+                        <span className="text-xs font-bold text-red-600">{validationErrors.length} error{validationErrors.length > 1 ? 'es' : ''}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={isSubmitting}
+                      className="px-10 py-2.5 font-bold rounded-xl transition-all bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSubmitting ? 'Guardando...' : 'Guardar'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
