@@ -45,6 +45,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     sex: [] as string[],
     dateRange: ['', ''] as [string, string]
   });
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeName, setMergeName] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -249,15 +251,18 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     });
   };
 
+  const handleSave = async () => {
+    if (!isEditing) return;
+    if (!validateForm()) return;
+    await saveHerd();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isEditing) return;
+    await handleSave();
+  };
 
-    // Validar antes de guardar
-    if (!validateForm()) {
-      return;
-    }
-
+  const saveHerd = async () => {
     setIsSubmitting(true);
     const qty = Number(formData.quantity) || 0;
     const weightPer = Number(formData.weightPerAnimal) || 0;
@@ -300,6 +305,51 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       handleCloseModal();
     } catch (error) {
       handleFirestoreError(error, editingHerd ? 'update' : 'create', `farms/${farmId}/herds`, auth);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMergeTropas = async () => {
+    if (selectedHerds.length < 2 || !mergeName.trim()) return;
+    setIsSubmitting(true);
+    try {
+      const tropasMezcladas = herds.filter(h => selectedHerds.includes(h.id));
+      const totalQty = tropasMezcladas.reduce((sum, h) => sum + h.quantity, 0);
+      const weightedAvg = totalQty > 0
+        ? tropasMezcladas.reduce((sum, h) => sum + h.weightPerAnimal * h.quantity, 0) / totalQty
+        : 0;
+      const allEvents = tropasMezcladas.flatMap(h => h.events || []);
+      const allNotes = tropasMezcladas.map(h => h.notes).filter(Boolean).join(' | ');
+      const first = tropasMezcladas[0];
+
+      const mergedData = {
+        name: mergeName.trim(),
+        sex: 'Mixto' as const,
+        quantity: totalQty,
+        weightPerAnimal: Math.round(weightedAvg),
+        totalWeight: totalQty * Math.round(weightedAvg),
+        status: first.status,
+        stage: first.stage || 'Iniciación',
+        notes: allNotes,
+        events: allEvents,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const batch = writeBatch(db);
+      const newRef = doc(collection(db, `farms/${farmId}/herds`));
+      batch.set(newRef, mergedData);
+      tropasMezcladas.forEach(h => {
+        batch.delete(doc(db, `farms/${farmId}/herds`, h.id));
+      });
+      await batch.commit();
+
+      setIsMergeModalOpen(false);
+      setMergeName('');
+      setSelectedHerds([]);
+    } catch (error) {
+      handleFirestoreError(error, 'create', `farms/${farmId}/herds`, auth);
     } finally {
       setIsSubmitting(false);
     }
@@ -378,7 +428,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             <Activity className="w-7 h-7" />
           </div>
           <div>
-            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Rodeos</p>
+            <p className="text-sm text-stone-500 font-medium uppercase tracking-wider">Total Tropas</p>
             <p className="text-3xl font-bold text-stone-900">{herds.length}</p>
           </div>
         </div>
@@ -417,7 +467,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <input
             type="text"
-            placeholder="Buscar rodeo por nombre, sexo o estado..."
+            placeholder="Buscar tropa por nombre, sexo o estado..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
@@ -428,7 +478,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
         >
           <Plus className="w-5 h-5" />
-          <span>Nuevo Rodeo</span>
+          <span>Nueva Tropa</span>
         </button>
       </div>
 
@@ -445,14 +495,27 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl flex items-center justify-between shadow-sm">
           <span className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
-            {selectedHerds.length} rodeos seleccionados
+            {selectedHerds.length} tropa{selectedHerds.length > 1 ? 's' : ''} seleccionada{selectedHerds.length > 1 ? 's' : ''}
           </span>
-          <button
-            onClick={() => setSelectedHerds([])}
-            className="bg-stone-200 hover:bg-stone-300 text-stone-700 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
-          >
-            Deshacer
-          </button>
+          <div className="flex gap-2">
+            {selectedHerds.length >= 2 && (
+              <button
+                onClick={() => {
+                  setMergeName('');
+                  setIsMergeModalOpen(true);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
+              >
+                Mezclar Tropas
+              </button>
+            )}
+            <button
+              onClick={() => setSelectedHerds([])}
+              className="bg-stone-200 hover:bg-stone-300 text-stone-700 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
+            >
+              Deshacer
+            </button>
+          </div>
         </div>
       )}
 
@@ -489,7 +552,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               {filteredHerds.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="p-8 text-center text-stone-500">
-                    No se encontraron rodeos.
+                    No se encontraron tropas.
                   </td>
                 </tr>
               ) : (
@@ -567,7 +630,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-stone-900">
-                    {editingHerd ? `Rodeo: ${editingHerd.name}` : 'Nuevo Rodeo'}
+                    {editingHerd ? `Tropa: ${editingHerd.name}` : 'Nueva Tropa'}
                   </h3>
                   <p className="text-sm text-stone-500">
                     {isEditing ? 'Edición' : 'Visualización'}
@@ -628,7 +691,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
 
                   <fieldset disabled={!isEditing} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Nombre del Rodeo</label>
+                      <label className="text-sm font-bold text-stone-700">Nombre de la Tropa</label>
                       <input
                         type="text"
                         required
@@ -639,7 +702,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                             ? 'border-red-300 focus:ring-red-500'
                             : 'border-stone-200 focus:ring-emerald-500'
                         }`}
-                        placeholder="Ej: Rodeo A"
+                        placeholder="Ej: Tropa A"
                       />
                       <FieldError
                         error={validationErrors.find(e => e.field === 'name')?.message}
@@ -933,8 +996,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     </div>
                   )}
                   <button
-                    type="submit"
-                    form="herd-form"
+                    type="button"
+                    onClick={handleSave}
                     disabled={isSubmitting || (showValidationErrors && validationErrors.length > 0)}
                     className={`px-10 py-2.5 font-bold rounded-xl transition-all ${
                       showValidationErrors && validationErrors.length > 0
@@ -960,7 +1023,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             </div>
             <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Confirmar eliminación</h3>
             <p className="text-stone-600 mb-6 text-center">
-              ¿Estás seguro de eliminar este rodeo?
+              ¿Estás seguro de eliminar esta tropa?
             </p>
             <div className="flex flex-col gap-2">
               <button
@@ -971,6 +1034,67 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               </button>
               <button
                 onClick={() => setIsConfirmDeleteOpen(false)}
+                className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Tropas Modal */}
+      {isMergeModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 mx-auto">
+              <TrendingUp className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold text-stone-900 mb-2 text-center">Mezclar Tropas</h3>
+            <p className="text-stone-600 mb-4 text-center text-sm">
+              Se mezclarán {selectedHerds.length} tropas en una nueva. Los animales se suman y el peso promedio se pondera.
+            </p>
+            <div className="mb-4 p-3 bg-stone-50 rounded-xl text-sm space-y-1">
+              {herds.filter(h => selectedHerds.includes(h.id)).map(h => (
+                <div key={h.id} className="flex justify-between text-stone-700">
+                  <span className="font-medium">{h.name}</span>
+                  <span>{h.quantity} animales · {h.weightPerAnimal} kg/an.</span>
+                </div>
+              ))}
+              <div className="border-t border-stone-200 pt-2 mt-2 flex justify-between font-bold text-stone-800">
+                <span>Total</span>
+                <span>
+                  {herds.filter(h => selectedHerds.includes(h.id)).reduce((s, h) => s + h.quantity, 0)} animales ·{' '}
+                  {(() => {
+                    const tropas = herds.filter(h => selectedHerds.includes(h.id));
+                    const total = tropas.reduce((s, h) => s + h.quantity, 0);
+                    return total > 0
+                      ? Math.round(tropas.reduce((s, h) => s + h.weightPerAnimal * h.quantity, 0) / total)
+                      : 0;
+                  })()} kg/an. prom.
+                </span>
+              </div>
+            </div>
+            <div className="mb-6 space-y-2">
+              <label className="text-sm font-bold text-stone-700">Nombre de la nueva tropa</label>
+              <input
+                type="text"
+                value={mergeName}
+                onChange={(e) => setMergeName(e.target.value)}
+                placeholder="Ej: Tropa Mezclada"
+                className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleMergeTropas}
+                disabled={!mergeName.trim() || isSubmitting}
+                className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? 'Mezclando...' : 'Confirmar Mezcla'}
+              </button>
+              <button
+                onClick={() => { setIsMergeModalOpen(false); setMergeName(''); }}
                 className="w-full py-2.5 text-stone-600 font-bold hover:bg-stone-100 rounded-xl"
               >
                 Cancelar
