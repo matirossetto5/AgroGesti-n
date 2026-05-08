@@ -14,7 +14,7 @@ export const herdValidators = {
   name: (value: string): ValidationError[] => {
     const errors: ValidationError[] = [];
     if (!value || value.trim().length === 0) {
-      errors.push({ field: 'name', message: 'El nombre del rodeo es requerido', type: 'error' });
+      errors.push({ field: 'name', message: 'El nombre de la tropa es requerido', type: 'error' });
     }
     if (value.length > 100) {
       errors.push({ field: 'name', message: 'El nombre no puede exceder 100 caracteres', type: 'error' });
