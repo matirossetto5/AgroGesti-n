@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError } from '../lib/errorHandlers';
-import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Activity, Scale, X, History, Syringe, TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed } from 'lucide-react';
 import { Herd, HerdEvent, DietIngredient, DietPlan } from '../types';
 import { validateHerdForm, validateDietForm, ValidationError } from '../lib/validators';
 import { ValidationMessage, FieldError } from './ValidationMessage';
@@ -33,7 +33,9 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHerd, setEditingHerd] = useState<Herd | null>(null);
   const [modalMode, setModalMode] = useState<'view' | 'edit'>('view');
-  const [modalTab, setModalTab] = useState<'details' | 'diet' | 'history'>('details');
+  const [modalTab, setModalTab] = useState<'details' | 'history'>('details');
+  const [isDietModalOpen, setIsDietModalOpen] = useState(false);
+  const [dietHerdId, setDietHerdId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedHerds, setSelectedHerds] = useState<string[]>([]);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
@@ -116,12 +118,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         notes: herd.notes || '',
         events: herd.events || []
       });
-      if (herd.feedingPlan) {
-        setDietForm({
-          name: herd.feedingPlan.name,
-          ingredients: herd.feedingPlan.ingredients
-        });
-      }
       setModalTab('details');
     } else {
       setEditingHerd(null);
@@ -135,7 +131,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         notes: '',
         events: []
       });
-      setDietForm({ name: '', ingredients: [] });
       setModalTab('details');
     }
     setIsModalOpen(true);
@@ -159,22 +154,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       status: formData.status
     });
 
-    let allErrors = [...result.errors];
-    let allWarnings = [...result.warnings];
-
-    // Validar dieta si es engorde
-    if (formData.status === 'Engorde' && dietForm.ingredients.length > 0) {
-      const dietResult = validateDietForm({
-        ingredients: dietForm.ingredients,
-        quantity: Number(formData.quantity) || 1
-      });
-
-      allErrors = [...allErrors, ...dietResult.errors];
-      allWarnings = [...allWarnings, ...dietResult.warnings];
-    }
-
-    setValidationErrors(allErrors);
-    setValidationWarnings(allWarnings);
+    setValidationErrors(result.errors);
+    setValidationWarnings(result.warnings);
 
     return allErrors.length === 0;
   };
@@ -224,6 +205,63 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     setFormData(prev => ({ ...prev, events: prev.events.filter(e => e.id !== eventId) }));
   };
 
+  const handleOpenDietModal = () => {
+    const engordoHerds = herds.filter(h => h.status === 'Engorde');
+    const firstHerd = engordoHerds[0];
+    if (firstHerd) {
+      setDietHerdId(firstHerd.id);
+      setDietForm(firstHerd.feedingPlan
+        ? { name: firstHerd.feedingPlan.name, ingredients: firstHerd.feedingPlan.ingredients }
+        : { name: '', ingredients: [] }
+      );
+    } else {
+      setDietHerdId('');
+      setDietForm({ name: '', ingredients: [] });
+    }
+    setSaveError(null);
+    setIsDietModalOpen(true);
+  };
+
+  const handleDietHerdChange = (herdId: string) => {
+    setDietHerdId(herdId);
+    const herd = herds.find(h => h.id === herdId);
+    setDietForm(herd?.feedingPlan
+      ? { name: herd.feedingPlan.name, ingredients: herd.feedingPlan.ingredients }
+      : { name: '', ingredients: [] }
+    );
+  };
+
+  const handleSaveDiet = async () => {
+    if (!dietHerdId) return;
+    setSaveError(null);
+    setIsSubmitting(true);
+    try {
+      const herd = herds.find(h => h.id === dietHerdId);
+      if (!herd) return;
+      const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
+      const feedingPlan = dietForm.ingredients.length > 0 ? {
+        id: herd.feedingPlan?.id || Date.now().toString(),
+        herdId: herd.id,
+        name: dietForm.name,
+        ingredients: dietForm.ingredients,
+        totalKgPerDay: totalKg,
+        totalCostPerDay: totalPrice,
+        createdAt: herd.feedingPlan?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } : null;
+      await updateDoc(doc(db, `farms/${farmId}/herds`, dietHerdId), {
+        feedingPlan,
+        updatedAt: new Date().toISOString()
+      });
+      setIsDietModalOpen(false);
+    } catch (error: any) {
+      console.error('Error guardando dieta:', error);
+      setSaveError(error?.message || 'Error al guardar la dieta. Verificá tu conexión e intentá de nuevo.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleAddDietIngredient = () => {
     setDietForm(prev => ({
       ...prev,
@@ -264,7 +302,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
     try {
       const qty = Number(formData.quantity) || 0;
       const weightPer = Number(formData.weightPerAnimal) || 0;
-      const { totalKg, totalPrice } = calculateDietCosts(dietForm.ingredients);
 
       const herdData = {
         name: formData.name.trim(),
@@ -276,16 +313,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         stage: formData.stage,
         notes: formData.notes,
         events: formData.events,
-        feedingPlan: formData.status === 'Engorde' && dietForm.ingredients.length > 0 ? {
-          id: editingHerd?.feedingPlan?.id || Date.now().toString(),
-          herdId: editingHerd?.id || '',
-          name: dietForm.name,
-          ingredients: dietForm.ingredients,
-          totalKgPerDay: totalKg,
-          totalCostPerDay: totalPrice,
-          createdAt: editingHerd?.feedingPlan?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        } : null,
+        feedingPlan: editingHerd?.feedingPlan || null,
         updatedAt: new Date().toISOString()
       };
 
@@ -469,13 +497,24 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
             className="w-full pl-10 pr-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
           />
         </div>
-        <button
-          onClick={() => handleOpenModal(undefined, 'edit')}
-          className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Nueva Tropa</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleOpenDietModal}
+            disabled={engordoHerds === 0}
+            className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+            title={engordoHerds === 0 ? 'No hay tropas en Engorde' : 'Gestionar dietas de tropas en Engorde'}
+          >
+            <UtensilsCrossed className="w-5 h-5" />
+            <span>Gestionar Dietas</span>
+          </button>
+          <button
+            onClick={() => handleOpenModal(undefined, 'edit')}
+            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Nueva Tropa</span>
+          </button>
+        </div>
       </div>
 
       {/* Advanced Filters */}
@@ -651,16 +690,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               >
                 Detalles
               </button>
-              {formData.status === 'Engorde' && (
-                <button
-                  onClick={() => setModalTab('diet')}
-                  className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
-                    modalTab === 'diet' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-stone-400 hover:text-stone-600'
-                  }`}
-                >
-                  Dieta
-                </button>
-              )}
               <button
                 onClick={() => setModalTab('history')}
                 className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${
@@ -792,108 +821,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       </div>
                     )}
                   </fieldset>
-                </div>
-              ) : modalTab === 'diet' ? (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-stone-700">Nombre de la Dieta</label>
-                      <input
-                        type="text"
-                        disabled={!isEditing}
-                        value={dietForm.name}
-                        onChange={(e) => setDietForm({ ...dietForm, name: e.target.value })}
-                        className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-stone-50"
-                        placeholder="Ej: Dieta Terminación"
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <h4 className="font-bold text-stone-800">Insumos</h4>
-                        {isEditing && (
-                          <button
-                            type="button"
-                            onClick={handleAddDietIngredient}
-                            className="text-emerald-600 hover:text-emerald-700 font-medium text-sm"
-                          >
-                            + Agregar Insumo
-                          </button>
-                        )}
-                      </div>
-
-                      {dietForm.ingredients.length === 0 ? (
-                        <p className="text-stone-400 text-sm">Sin insumos registrados</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {dietForm.ingredients.map((ing, idx) => (
-                            <div key={idx} className="grid grid-cols-4 gap-2 p-3 bg-stone-50 rounded-lg">
-                              <input
-                                type="text"
-                                disabled={!isEditing}
-                                list="ingredients-list"
-                                value={ing.type}
-                                onChange={(e) => handleUpdateDietIngredient(idx, 'type', e.target.value)}
-                                placeholder="Tipo"
-                                className="p-2 border rounded disabled:bg-stone-100"
-                              />
-                              <input
-                                type="number"
-                                disabled={!isEditing}
-                                value={ing.kg}
-                                onChange={(e) => handleUpdateDietIngredient(idx, 'kg', e.target.value)}
-                                placeholder="kg"
-                                min="0"
-                                step="0.1"
-                                className="p-2 border rounded disabled:bg-stone-100"
-                              />
-                              <input
-                                type="number"
-                                disabled={!isEditing}
-                                value={ing.pricePerKg}
-                                onChange={(e) => handleUpdateDietIngredient(idx, 'pricePerKg', e.target.value)}
-                                placeholder="Precio/kg"
-                                min="0"
-                                step="0.01"
-                                className="p-2 border rounded disabled:bg-stone-100"
-                              />
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-bold text-stone-700">${ing.totalPrice.toFixed(2)}</span>
-                                {isEditing && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveDietIngredient(idx)}
-                                    className="text-red-600 hover:text-red-700"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {dietForm.ingredients.length > 0 && (
-                        <div className="mt-4 p-4 bg-emerald-50 rounded-lg border border-emerald-100">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-xs text-stone-600 uppercase font-bold">Total kg/día</p>
-                              <p className="text-2xl font-bold text-emerald-700">
-                                {calculateDietCosts(dietForm.ingredients).totalKg.toFixed(2)} kg
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-stone-600 uppercase font-bold">Costo/día</p>
-                              <p className="text-2xl font-bold text-emerald-700">
-                                ${calculateDietCosts(dietForm.ingredients).totalPrice.toFixed(2)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -1099,6 +1026,174 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               >
                 Cancelar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Diet Management Modal */}
+      {isDietModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-100 text-amber-700 rounded-lg">
+                  <UtensilsCrossed className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-stone-900">Gestionar Dietas</h3>
+                  <p className="text-sm text-stone-500">Tropas en Engorde</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDietModalOpen(false)}
+                className="p-2 hover:bg-stone-200 rounded-full transition-colors"
+              >
+                <X className="w-6 h-6 text-stone-400" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 bg-white space-y-6">
+              {/* Herd selector */}
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-stone-700">Seleccionar Tropa</label>
+                <select
+                  value={dietHerdId}
+                  onChange={(e) => handleDietHerdChange(e.target.value)}
+                  className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                >
+                  {herds.filter(h => h.status === 'Engorde').map(h => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {dietHerdId && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-stone-700">Nombre de la Dieta</label>
+                    <input
+                      type="text"
+                      value={dietForm.name}
+                      onChange={(e) => setDietForm({ ...dietForm, name: e.target.value })}
+                      className="w-full p-2.5 border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                      placeholder="Ej: Dieta Terminación"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-bold text-stone-800">Insumos</h4>
+                      <button
+                        type="button"
+                        onClick={handleAddDietIngredient}
+                        className="text-amber-600 hover:text-amber-700 font-medium text-sm"
+                      >
+                        + Agregar Insumo
+                      </button>
+                    </div>
+
+                    {dietForm.ingredients.length === 0 ? (
+                      <p className="text-stone-400 text-sm">Sin insumos registrados</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-4 gap-2 px-3 text-xs font-bold text-stone-500 uppercase">
+                          <span>Tipo</span>
+                          <span>kg/día</span>
+                          <span>Precio/kg</span>
+                          <span>Total</span>
+                        </div>
+                        {dietForm.ingredients.map((ing, idx) => (
+                          <div key={idx} className="grid grid-cols-4 gap-2 p-3 bg-stone-50 rounded-lg">
+                            <input
+                              type="text"
+                              list="ingredients-list"
+                              value={ing.type}
+                              onChange={(e) => handleUpdateDietIngredient(idx, 'type', e.target.value)}
+                              placeholder="Tipo"
+                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                            <input
+                              type="number"
+                              value={ing.kg}
+                              onChange={(e) => handleUpdateDietIngredient(idx, 'kg', e.target.value)}
+                              placeholder="kg"
+                              min="0"
+                              step="0.1"
+                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                            <input
+                              type="number"
+                              value={ing.pricePerKg}
+                              onChange={(e) => handleUpdateDietIngredient(idx, 'pricePerKg', e.target.value)}
+                              placeholder="$/kg"
+                              min="0"
+                              step="0.01"
+                              className="p-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-bold text-stone-700">${ing.totalPrice.toFixed(2)}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveDietIngredient(idx)}
+                                className="text-red-500 hover:text-red-700 p-1"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {dietForm.ingredients.length > 0 && (
+                      <div className="mt-2 p-4 bg-amber-50 rounded-xl border border-amber-100">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-stone-600 uppercase font-bold">Total kg/día</p>
+                            <p className="text-2xl font-bold text-amber-700">
+                              {calculateDietCosts(dietForm.ingredients).totalKg.toFixed(2)} kg
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-stone-600 uppercase font-bold">Costo/día</p>
+                            <p className="text-2xl font-bold text-amber-700">
+                              ${calculateDietCosts(dietForm.ingredients).totalPrice.toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-stone-100 bg-stone-50/50 space-y-3">
+              {saveError && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span className="text-sm text-red-700">{saveError}</span>
+                </div>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setIsDietModalOpen(false)}
+                  className="px-6 py-2.5 text-stone-600 font-bold hover:bg-stone-200 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveDiet}
+                  disabled={isSubmitting || !dietHerdId}
+                  className="px-10 py-2.5 font-bold rounded-xl transition-all bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting ? 'Guardando...' : 'Guardar Dieta'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
