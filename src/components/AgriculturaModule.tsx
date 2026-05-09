@@ -263,8 +263,8 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                                 <p className="text-sm font-bold text-stone-700">{event.details.variety || '-'}</p>
                               </div>
                               <div>
-                                <p className="text-[10px] uppercase font-bold text-stone-400">Densidad</p>
-                                <p className="text-sm font-bold text-stone-700">{event.details.density || '-'} pl/m2</p>
+                                <p className="text-[10px] uppercase font-bold text-stone-400">Plantas por ha</p>
+                                <p className="text-sm font-bold text-stone-700">{event.details.density || '-'} plantas/ha</p>
                               </div>
                             </>
                           )}
@@ -405,123 +405,126 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
             )}
           </motion.div>
         ) : activeSubTab === 'porLote' ? (
-          <motion.div 
+          <motion.div
             key="porLote"
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
-            className="space-y-6"
+            className="space-y-4"
           >
-            {lots.map(lot => {
-              const lotEvents = events.filter(e => e.lotId === lot.id);
-              if (lotEvents.length === 0) return null;
-              
-              return (
-                <div key={lot.id} className="bg-white border border-stone-200 rounded-[2.5rem] overflow-hidden shadow-sm">
-                  <div className="bg-stone-50 px-8 py-4 border-b border-stone-200 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
-                        <Target className="w-5 h-5 text-emerald-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-black text-stone-800 text-lg">{lot.name}</h3>
-                        <p className="text-xs text-stone-500 font-bold uppercase tracking-widest">{lot.area?.toFixed(1) || '?'} Hectáreas</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-4 text-center">
-                      <div className="px-4 border-r border-stone-200">
-                        <p className="text-[10px] text-stone-400 font-bold uppercase">Eventos</p>
-                        <p className="text-lg font-black text-stone-700">{lotEvents.length}</p>
-                      </div>
-                      <div className="px-4">
-                        <p className="text-[10px] text-stone-400 font-bold uppercase">Últ. Actividad</p>
-                        <p className="text-lg font-black text-stone-700">{lotEvents[0].date.toLocaleDateString('es-AR')}</p>
-                      </div>
-                    </div>
+            {/* Lot search */}
+            <div className="relative max-w-sm">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre de lote..."
+                value={selectedCampaign}
+                onChange={e => setSelectedCampaign(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            {events.length === 0 ? (
+              <div className="bg-white border-2 border-dashed border-stone-200 rounded-[2rem] p-12 text-center">
+                <Target className="w-16 h-16 text-stone-300 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-stone-800">No hay datos por lote</h3>
+                <p className="text-stone-500">Registra actividades para ver el historial organizado por lote.</p>
+              </div>
+            ) : (() => {
+              const lotsWithEvents = lots.filter(lot => {
+                const hasEvents = events.some(e => e.lotId === lot.id);
+                const matchesSearch = !selectedCampaign || lot.name.toLowerCase().includes(selectedCampaign.toLowerCase());
+                return hasEvents && matchesSearch;
+              });
+
+              if (lotsWithEvents.length === 0) {
+                return (
+                  <div className="bg-white border-2 border-dashed border-stone-200 rounded-[2rem] p-12 text-center">
+                    <Target className="w-16 h-16 text-stone-300 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold text-stone-800">Sin resultados</h3>
+                    <p className="text-stone-500">No hay lotes que coincidan con la búsqueda.</p>
                   </div>
-                  
-                  <div className="p-4 md:p-8">
-                    <div className="relative border-l-2 border-stone-100 ml-4 space-y-8 py-2">
-                      {lotEvents.map((event, idx) => (
-                        <div key={event.id} className="relative pl-8">
-                          {/* Timeline dot */}
-                          <div className={`absolute left-[-9px] top-0 w-4 h-4 rounded-full border-2 border-white shadow-sm ${
-                            event.type === 'siembra' ? 'bg-emerald-500' : 
-                            event.type === 'cosecha' ? 'bg-amber-500' : 'bg-purple-500'
-                          }`} />
-                          
-                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${
-                                  event.type === 'siembra' ? 'bg-emerald-50 text-emerald-700' : 
-                                  event.type === 'cosecha' ? 'bg-amber-50 text-amber-700' : 'bg-purple-50 text-purple-700'
+                );
+              }
+
+              return (
+                <div className="bg-white border border-stone-200 rounded-[2rem] overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="bg-stone-50 border-b border-stone-200">
+                        <tr className="text-stone-500 text-xs font-bold uppercase tracking-wider">
+                          <th className="px-6 py-3">Lote</th>
+                          <th className="px-6 py-3">Superficie</th>
+                          <th className="px-6 py-3">Tipo</th>
+                          <th className="px-6 py-3">Cultivo</th>
+                          <th className="px-6 py-3">Campaña</th>
+                          <th className="px-6 py-3">Fecha</th>
+                          <th className="px-6 py-3">Detalle</th>
+                          <th className="px-6 py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {lotsWithEvents.flatMap(lot => {
+                          const lotEvents = events
+                            .filter(e => e.lotId === lot.id)
+                            .sort((a, b) => b.date.getTime() - a.date.getTime());
+                          return lotEvents.map((event, idx) => (
+                            <tr key={event.id} className="hover:bg-stone-50/60 transition-colors group">
+                              {idx === 0 && (
+                                <td className="px-6 py-4 font-black text-stone-800 align-top" rowSpan={lotEvents.length}>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
+                                      <Target className="w-4 h-4 text-emerald-600" />
+                                    </div>
+                                    {lot.name}
+                                  </div>
+                                </td>
+                              )}
+                              {idx === 0 && (
+                                <td className="px-6 py-4 text-stone-500 text-sm align-top" rowSpan={lotEvents.length}>
+                                  {lot.area?.toFixed(1) || '?'} ha
+                                </td>
+                              )}
+                              <td className="px-6 py-4">
+                                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
+                                  event.type === 'siembra' ? 'bg-emerald-100 text-emerald-700' :
+                                  event.type === 'aplicacion' ? 'bg-purple-100 text-purple-700' :
+                                  'bg-amber-100 text-amber-700'
                                 }`}>
                                   {getEventLabel(event.type)}
                                 </span>
-                                <span className="text-xs text-stone-400 font-mono">{event.date.toLocaleDateString('es-AR')}</span>
-                              </div>
-                              <h4 className="text-lg font-black text-stone-900">{event.crop}</h4>
-                            </div>
-                            
-                            <div className="flex flex-wrap gap-4 bg-stone-50 p-3 rounded-2xl border border-stone-100">
-                              {event.type === 'siembra' && (
-                                <>
-                                  <div className="pr-4 border-r border-stone-200">
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Variedad</p>
-                                    <p className="text-xs font-bold text-stone-700">{event.details.variety || '-'}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Densidad</p>
-                                    <p className="text-xs font-bold text-stone-700">{event.details.density || '-'} pl/m2</p>
-                                  </div>
-                                </>
-                              )}
-                              {event.type === 'cosecha' && (
-                                <>
-                                  <div className="pr-4 border-r border-stone-200">
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Rinde</p>
-                                    <p className="text-xs font-bold text-emerald-600">{event.details.yield || '-'} qq/ha</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Humedad</p>
-                                    <p className="text-xs font-bold text-stone-700">{event.details.moisture || '-'}%</p>
-                                  </div>
-                                </>
-                              )}
-                              {event.type === 'aplicacion' && (
-                                <>
-                                  <div className="pr-4 border-r border-stone-200">
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Producto</p>
-                                    <p className="text-xs font-bold text-purple-700">{event.details.product || '-'}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] text-stone-400 uppercase font-bold">Dosis</p>
-                                    <p className="text-xs font-bold text-stone-700">{event.details.dose || '-'} l/ha</p>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {idx < lotEvents.length - 1 && (
-                            <div className="absolute left-[-1px] top-4 bottom-[-32px] w-[2px] bg-stone-100" />
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-stone-800 text-sm">{event.crop}</td>
+                              <td className="px-6 py-4 text-stone-500 text-sm">{event.campaign} {event.year}</td>
+                              <td className="px-6 py-4 text-stone-500 text-sm whitespace-nowrap">{event.date.toLocaleDateString('es-AR')}</td>
+                              <td className="px-6 py-4 text-sm text-stone-600">
+                                {event.type === 'siembra' && (
+                                  <span>{event.details.variety || '-'}{event.details.density ? ` · ${event.details.density} plantas/ha` : ''}</span>
+                                )}
+                                {event.type === 'cosecha' && (
+                                  <span className="text-emerald-600 font-bold">{event.details.yield || '-'} qq/ha{event.details.moisture ? ` · ${event.details.moisture}% hum.` : ''}</span>
+                                )}
+                                {event.type === 'aplicacion' && (
+                                  <span>{event.details.product || '-'}{event.details.dose ? ` · ${event.details.dose} l/ha` : ''}</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  onClick={() => deleteEvent(event.id)}
+                                  className="p-2 text-stone-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ));
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               );
-            })}
-            
-            {new Set(events.map(e => e.lotId)).size === 0 && (
-               <div className="bg-white border-2 border-dashed border-stone-200 rounded-[2rem] p-12 text-center">
-                 <Target className="w-16 h-16 text-stone-300 mx-auto mb-4" />
-                 <h3 className="text-xl font-bold text-stone-800">No hay datos por lote</h3>
-                 <p className="text-stone-500">Registra actividades para ver el historial organizado por lote.</p>
-               </div>
-            )}
+            })()}
           </motion.div>
         ) : (
           <motion.div 
@@ -666,7 +669,7 @@ export default function AgriculturaModule({ farmId }: { farmId: string }) {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-bold text-stone-700 mb-2">Densidad (pl/m2)</label>
+                      <label className="block text-sm font-bold text-stone-700 mb-2">Plantas por ha</label>
                       <input 
                         type="number"
                         step="0.1"

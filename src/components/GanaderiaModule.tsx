@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import {
   Plus, PlusCircle, MinusCircle, Edit2, Trash2, Search, Scale, X, History,
   TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed,
-  ArrowRight, ShoppingCart, Activity, CheckCircle, Clock,
+  ArrowRight, ShoppingCart, Activity, CheckCircle,
   Users
 } from 'lucide-react';
 import { Tropa, TropaEvent, RegistroRacion } from '../types';
@@ -185,6 +185,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const [isHistorialOpen, setIsHistorialOpen] = useState(false);
   const [historialTropa, setHistorialTropa] = useState<Tropa | null>(null);
   const [historialTab, setHistorialTab] = useState<'eventos' | 'raciones'>('eventos');
+  const [historialDateFilter, setHistorialDateFilter] = useState<{ from: string; to: string }>({ from: '', to: '' });
 
   // Delete confirm
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -765,10 +766,6 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   <div className="px-5 py-4 grid grid-cols-2 gap-3">
                     <Metric label="Animales" value={tropa.quantity.toString()} icon={<Users className="w-4 h-4" />} />
                     <Metric label="Peso actual" value={`${tropa.currentWeight} kg`} icon={<Scale className="w-4 h-4" />} highlight={ready} />
-                    <Metric label="Ingresó con" value={`${tropa.entryWeight} kg`} icon={<TrendingUp className="w-4 h-4" />} />
-                    <Metric label="Ganancia" value={`${weightGain >= 0 ? '+' : ''}${weightGain} kg`} icon={<TrendingUp className="w-4 h-4" />} />
-                    <Metric label="Días en campo" value={`${days} días`} icon={<Clock className="w-4 h-4" />} />
-                    <Metric label="Ingreso" value={tropa.entryDate || '-'} icon={<Activity className="w-4 h-4" />} />
                   </div>
 
                   {/* Footer actions */}
@@ -776,10 +773,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Pesaje" variant="blue" />
                     <ActionBtn onClick={() => openAgregar(tropa.id)} icon={<PlusCircle className="w-4 h-4" />} label="Agregar Animales" variant="ghost" />
                     <ActionBtn onClick={() => openBaja(tropa.id)} icon={<MinusCircle className="w-4 h-4" />} label="Baja" variant="ghost" />
-                    {ready && (
-                      <ActionBtn onClick={() => openTerminacion(tropa.id)} icon={<ArrowRight className="w-4 h-4" />} label="Pasar a Terminación" variant="amber" />
-                    )}
-                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
+                    <ActionBtn onClick={() => openTerminacion(tropa.id)} icon={<ArrowRight className="w-4 h-4" />} label="Pasar a Terminación" variant="amber" />
+                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setHistorialDateFilter({ from: '', to: '' }); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
                   </div>
                 </div>
               );
@@ -878,7 +873,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                     <ActionBtn onClick={() => openPesaje(tropa.id)} icon={<Scale className="w-4 h-4" />} label="Pesaje" variant="blue" />
                     <ActionBtn onClick={() => openVenta(tropa.id)} icon={<ShoppingCart className="w-4 h-4" />} label="Registrar Venta" variant={readyToSell ? 'emerald' : 'ghost'} />
                     <ActionBtn onClick={() => openBaja(tropa.id)} icon={<MinusCircle className="w-4 h-4" />} label="Baja" variant="ghost" />
-                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
+                    <ActionBtn onClick={() => { setHistorialTropa(tropa); setHistorialTab('eventos'); setHistorialDateFilter({ from: '', to: '' }); setIsHistorialOpen(true); }} icon={<History className="w-4 h-4" />} label="Historial" variant="ghost" />
                   </div>
                 </div>
               );
@@ -1390,24 +1385,70 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
               </button>
             </div>
 
+            {/* Date filter */}
+            <div className="px-5 py-3 border-b border-stone-100 bg-stone-50/50 shrink-0 flex flex-wrap gap-3 items-center">
+              <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">Filtrar por fecha:</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={historialDateFilter.from}
+                  onChange={e => setHistorialDateFilter(f => ({ ...f, from: e.target.value }))}
+                  className="p-1.5 text-xs border border-stone-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="text-xs text-stone-400">—</span>
+                <input
+                  type="date"
+                  value={historialDateFilter.to}
+                  onChange={e => setHistorialDateFilter(f => ({ ...f, to: e.target.value }))}
+                  className="p-1.5 text-xs border border-stone-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              {(historialDateFilter.from || historialDateFilter.to) && (
+                <button
+                  onClick={() => setHistorialDateFilter({ from: '', to: '' })}
+                  className="text-xs text-stone-400 hover:text-stone-600 flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Limpiar
+                </button>
+              )}
+            </div>
+
             <div className="flex-1 overflow-y-auto p-5">
-              {historialTab === 'eventos' ? (
-                (historialTropa.events || []).length === 0 ? (
+              {historialTab === 'eventos' ? (() => {
+                const allEvents = [...(historialTropa.events || [])].sort((a, b) => b.date.localeCompare(a.date));
+                const filteredEvents = allEvents.filter(ev => {
+                  if (historialDateFilter.from && ev.date < historialDateFilter.from) return false;
+                  if (historialDateFilter.to && ev.date > historialDateFilter.to) return false;
+                  return true;
+                });
+                return filteredEvents.length === 0 ? (
                   <div className="text-center py-8 text-stone-400">
                     <Activity className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                    <p>Sin eventos registrados</p>
+                    <p>{allEvents.length === 0 ? 'Sin eventos registrados' : 'Sin eventos en el período seleccionado'}</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {[...(historialTropa.events || [])].sort((a, b) => b.date.localeCompare(a.date)).map(ev => (
+                    {filteredEvents.map(ev => (
                       <div key={ev.id} className="p-4 bg-stone-50 rounded-xl border border-stone-100">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1">
                             <p className="text-xs text-stone-400 font-medium">{ev.date}</p>
                             <p className="font-bold text-stone-800 mt-0.5">{ev.type}</p>
-                            {ev.description && <p className="text-sm text-stone-600 mt-0.5">{ev.description}</p>}
-                            {ev.weightPerAnimal && ev.type === 'Pesaje' && (
-                              <p className="text-sm font-bold text-blue-600 mt-1">{ev.weightPerAnimal} kg/animal</p>
+                            {ev.type === 'Compra' ? (
+                              <div className="mt-1 text-sm text-stone-600 space-y-0.5">
+                                {ev.quantity != null && <p>Cantidad ingresada: <strong>{ev.quantity} animales</strong></p>}
+                                {ev.weightPerAnimal != null && <p>Peso promedio: <strong>{ev.weightPerAnimal} kg/an.</strong></p>}
+                                {ev.description?.includes(' · ') && (
+                                  <p>Origen: <strong>{ev.description.slice(ev.description.indexOf(' · ') + 3)}</strong></p>
+                                )}
+                              </div>
+                            ) : (
+                              <>
+                                {ev.description && <p className="text-sm text-stone-600 mt-0.5">{ev.description}</p>}
+                                {ev.weightPerAnimal && ev.type === 'Pesaje' && (
+                                  <p className="text-sm font-bold text-blue-600 mt-1">{ev.weightPerAnimal} kg/animal</p>
+                                )}
+                              </>
                             )}
                           </div>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
@@ -1425,8 +1466,8 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                       </div>
                     ))}
                   </div>
-                )
-              ) : (
+                );
+              })() : (
                 (historialTropa.raciones || []).length === 0 ? (
                   <div className="text-center py-8 text-stone-400">
                     <UtensilsCrossed className="w-10 h-10 mx-auto mb-2 opacity-20" />
@@ -1434,34 +1475,50 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {[...(historialTropa.raciones || [])].sort((a, b) => b.date.localeCompare(a.date)).map(r => {
-                      const total = r.siloMaiz + r.maizPartido + r.concentradoProteico;
-                      const cost = getRacionCostPerAnimal(r);
-                      return (
-                        <div key={r.id} className="p-4 bg-amber-50 rounded-xl border border-amber-100">
-                          <p className="text-xs text-stone-500 font-medium mb-2">{r.date}</p>
-                          <div className="grid grid-cols-3 gap-2 text-sm mb-2">
-                            <div>
-                              <p className="text-xs text-stone-500">Silo maíz</p>
-                              <p className="font-bold text-stone-700">{r.siloMaiz} kg/an.</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-stone-500">Maíz partido</p>
-                              <p className="font-bold text-stone-700">{r.maizPartido} kg/an.</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-stone-500">Concentrado</p>
-                              <p className="font-bold text-stone-700">{r.concentradoProteico} kg/an.</p>
-                            </div>
+                    {(() => {
+                      const allRaciones = [...(historialTropa.raciones || [])].sort((a, b) => b.date.localeCompare(a.date));
+                      const filteredRaciones = allRaciones.filter(r => {
+                        if (historialDateFilter.from && r.date < historialDateFilter.from) return false;
+                        if (historialDateFilter.to && r.date > historialDateFilter.to) return false;
+                        return true;
+                      });
+                      if (filteredRaciones.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-stone-400">
+                            <UtensilsCrossed className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                            <p>{allRaciones.length === 0 ? 'Sin raciones registradas' : 'Sin raciones en el período seleccionado'}</p>
                           </div>
-                          <div className="flex justify-between items-center pt-2 border-t border-amber-200">
-                            <span className="text-sm font-bold text-stone-700">Total: {total.toFixed(1)} kg/an./día</span>
-                            {cost > 0 && <span className="text-sm font-bold text-amber-700">${cost.toFixed(2)}/an./día</span>}
+                        );
+                      }
+                      return filteredRaciones.map(r => {
+                        const total = r.siloMaiz + r.maizPartido + r.concentradoProteico;
+                        const cost = getRacionCostPerAnimal(r);
+                        return (
+                          <div key={r.id} className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                            <p className="text-xs text-stone-500 font-medium mb-2">{r.date}</p>
+                            <div className="grid grid-cols-3 gap-2 text-sm mb-2">
+                              <div>
+                                <p className="text-xs text-stone-500">Silo maíz</p>
+                                <p className="font-bold text-stone-700">{r.siloMaiz} kg/an.</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-stone-500">Maíz partido</p>
+                                <p className="font-bold text-stone-700">{r.maizPartido} kg/an.</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-stone-500">Concentrado</p>
+                                <p className="font-bold text-stone-700">{r.concentradoProteico} kg/an.</p>
+                              </div>
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-amber-200">
+                              <span className="text-sm font-bold text-stone-700">Total: {total.toFixed(1)} kg/an./día</span>
+                              {cost > 0 && <span className="text-sm font-bold text-amber-700">${cost.toFixed(2)}/an./día</span>}
+                            </div>
+                            {r.notes && <p className="text-xs text-stone-500 mt-1">{r.notes}</p>}
                           </div>
-                          {r.notes && <p className="text-xs text-stone-500 mt-1">{r.notes}</p>}
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 )
               )}
