@@ -36,6 +36,20 @@ export interface Tropa {
   updatedAt: string;
 }
 
+export interface SaleRecord {
+  id: string;
+  date: string;
+  tropaName: string;
+  tropaSex: 'Macho' | 'Hembra';
+  tropaStatus: 'Recría' | 'Terminación';
+  quantity: number;
+  weightAtSale: number;
+  pricePerKg: number;
+  totalAmount: number;
+  notes: string;
+  createdAt: string;
+}
+
 export interface CampaignHarvest {
   id: string;
   campaign: string;
