@@ -4,10 +4,10 @@ import { db } from '../firebase';
 import {
   Plus, PlusCircle, MinusCircle, Edit2, Trash2, Search, Scale, X, History,
   TrendingUp, AlertCircle, AlertTriangle, UtensilsCrossed,
-  ArrowRight, ShoppingCart, Activity, CheckCircle,
+  ArrowRight, ShoppingCart, Activity, CheckCircle, DollarSign,
   Users
 } from 'lucide-react';
-import { Tropa, TropaEvent, RegistroRacion } from '../types';
+import { Tropa, TropaEvent, RegistroRacion, SaleRecord } from '../types';
 
 interface GanaderiaModuleProps {
   farmId: string;
@@ -133,8 +133,9 @@ function Modal({ title, onClose, onSave, isSubmitting, saveLabel = 'Guardar', sa
 
 export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
   const [tropas, setTropas] = useState<Tropa[]>([]);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'recria' | 'terminacion'>('recria');
+  const [activeTab, setActiveTab] = useState<'recria' | 'terminacion' | 'ventas'>('recria');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Herd modal
@@ -206,7 +207,13 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       console.error('Error loading tropas:', err);
       setIsLoading(false);
     });
-    return () => unsub();
+
+    const qSales = query(collection(db, `farms/${farmId}/sales`), orderBy('date', 'desc'));
+    const unsubSales = onSnapshot(qSales, (snap) => {
+      setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })) as SaleRecord[]);
+    }, (err) => console.error('Error loading sales:', err));
+
+    return () => { unsub(); unsubSales(); };
   }, [farmId]);
 
   // ---- Derived values ----
@@ -564,23 +571,44 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         return;
       }
       const pxkg = Number(ventaForm.pricePerKg) || 0;
-      const totalIncome = qty * w * pxkg;
+      const totalAmount = qty * w * pxkg;
       const event: TropaEvent = {
         id: Date.now().toString(),
         date: ventaForm.date,
         type: 'Otro',
-        description: `Venta/Faena: ${qty} animales · ${w} kg/an.${pxkg ? ` · $${pxkg}/kg · Total: $${totalIncome.toLocaleString()}` : ''}${ventaForm.notes ? ` · ${ventaForm.notes}` : ''}`,
+        description: `Venta/Faena: ${qty} animales · ${w} kg/an.${pxkg ? ` · $${pxkg}/kg · Total: $${totalAmount.toLocaleString()}` : ''}${ventaForm.notes ? ` · ${ventaForm.notes}` : ''}`,
       };
+
+      const batch = writeBatch(db);
+
+      // Persist sale record
+      const saleRef = doc(collection(db, `farms/${farmId}/sales`));
+      batch.set(saleRef, {
+        date: ventaForm.date,
+        tropaName: tropa.name,
+        tropaSex: tropa.sex,
+        tropaStatus: tropa.status,
+        quantity: qty,
+        weightAtSale: w,
+        pricePerKg: pxkg,
+        totalAmount,
+        notes: ventaForm.notes,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Update or delete the herd
       const remaining = tropa.quantity - qty;
       if (remaining <= 0) {
-        await deleteDoc(doc(db, `farms/${farmId}/herds`, ventaTropaId));
+        batch.delete(doc(db, `farms/${farmId}/herds`, ventaTropaId));
       } else {
-        await updateDoc(doc(db, `farms/${farmId}/herds`, ventaTropaId), {
+        batch.update(doc(db, `farms/${farmId}/herds`, ventaTropaId), {
           quantity: remaining,
           events: [event, ...(tropa.events || [])],
           updatedAt: new Date().toISOString(),
         });
       }
+
+      await batch.commit();
       setIsVentaOpen(false);
     } catch (e: any) {
       setModalError(e?.message || 'Error al registrar venta.');
@@ -692,10 +720,10 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-stone-200">
+      <div className="flex border-b border-stone-200 overflow-x-auto">
         <button
           onClick={() => setActiveTab('recria')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
+          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'recria'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-stone-400 hover:text-stone-600'
@@ -708,7 +736,7 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
         </button>
         <button
           onClick={() => setActiveTab('terminacion')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
+          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'terminacion'
               ? 'border-amber-600 text-amber-600'
               : 'border-transparent text-stone-400 hover:text-stone-600'
@@ -718,6 +746,16 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           {readyForSale.length > 0 && (
             <span className="ml-2 px-1.5 py-0.5 bg-emerald-500 text-white text-xs rounded-full">{readyForSale.length}</span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('ventas')}
+          className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${
+            activeTab === 'ventas'
+              ? 'border-emerald-600 text-emerald-600'
+              : 'border-transparent text-stone-400 hover:text-stone-600'
+          }`}
+        >
+          Historial de Ventas ({sales.length})
         </button>
       </div>
 
@@ -881,6 +919,117 @@ export default function GanaderiaModule({ farmId }: GanaderiaModuleProps) {
           </div>
         )
       )}
+
+      {/* ---- VENTAS TAB ---- */}
+      {activeTab === 'ventas' && (() => {
+        const totalAnimalesSold = sales.reduce((s, v) => s + v.quantity, 0);
+        const totalKgSold = sales.reduce((s, v) => s + v.quantity * v.weightAtSale, 0);
+        const totalRevenue = sales.reduce((s, v) => s + v.totalAmount, 0);
+
+        return sales.length === 0 ? (
+          <EmptyState text="No hay ventas registradas aún. Usá el botón 'Registrar Venta' en las tarjetas de Terminación." />
+        ) : (
+          <div className="space-y-5">
+            {/* Summary cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 flex items-center gap-4">
+                <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><ShoppingCart className="w-6 h-6" /></div>
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wider font-medium">Animales vendidos</p>
+                  <p className="text-2xl font-bold text-stone-900">{totalAnimalesSold}</p>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 flex items-center gap-4">
+                <div className="p-3 rounded-xl bg-blue-50 text-blue-600"><Scale className="w-6 h-6" /></div>
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wider font-medium">Kg totales vendidos</p>
+                  <p className="text-2xl font-bold text-stone-900">{totalKgSold.toLocaleString('es-AR')} kg</p>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 flex items-center gap-4">
+                <div className="p-3 rounded-xl bg-amber-50 text-amber-600"><DollarSign className="w-6 h-6" /></div>
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wider font-medium">Ingreso total</p>
+                  <p className="text-2xl font-bold text-stone-900">
+                    {totalRevenue > 0 ? `$${totalRevenue.toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-stone-50 border-b border-stone-200">
+                    <tr className="text-stone-500 text-xs font-bold uppercase tracking-wider">
+                      <th className="px-5 py-3">Fecha</th>
+                      <th className="px-5 py-3">Tropa</th>
+                      <th className="px-5 py-3">Sexo</th>
+                      <th className="px-5 py-3">Etapa</th>
+                      <th className="px-5 py-3 text-right">Cabezas</th>
+                      <th className="px-5 py-3 text-right">Peso/an.</th>
+                      <th className="px-5 py-3 text-right">Kg totales</th>
+                      <th className="px-5 py-3 text-right">$/kg</th>
+                      <th className="px-5 py-3 text-right">Total</th>
+                      <th className="px-5 py-3">Notas</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {sales.map(sale => (
+                      <tr key={sale.id} className="hover:bg-emerald-50/30 transition-colors">
+                        <td className="px-5 py-3 text-stone-600 text-sm font-medium whitespace-nowrap">
+                          {new Date(sale.date).toLocaleDateString('es-AR', { timeZone: 'UTC' })}
+                        </td>
+                        <td className="px-5 py-3 font-semibold text-stone-800 text-sm">{sale.tropaName}</td>
+                        <td className="px-5 py-3">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sale.tropaSex === 'Macho' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
+                            {sale.tropaSex}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sale.tropaStatus === 'Terminación' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {sale.tropaStatus}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right font-bold text-stone-800">{sale.quantity}</td>
+                        <td className="px-5 py-3 text-right text-stone-600 text-sm">{sale.weightAtSale} kg</td>
+                        <td className="px-5 py-3 text-right text-stone-600 text-sm">
+                          {(sale.quantity * sale.weightAtSale).toLocaleString('es-AR')} kg
+                        </td>
+                        <td className="px-5 py-3 text-right text-stone-600 text-sm">
+                          {sale.pricePerKg > 0 ? `$${sale.pricePerKg.toLocaleString('es-AR')}` : '—'}
+                        </td>
+                        <td className="px-5 py-3 text-right font-bold text-emerald-700">
+                          {sale.totalAmount > 0 ? `$${sale.totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
+                        </td>
+                        <td className="px-5 py-3 text-stone-500 text-sm max-w-[180px] truncate">{sale.notes || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {sales.length > 1 && (
+                    <tfoot className="bg-emerald-50/50 border-t border-stone-200">
+                      <tr>
+                        <td colSpan={4} className="px-5 py-3 font-bold text-stone-600 text-sm text-right">Totales:</td>
+                        <td className="px-5 py-3 text-right font-black text-stone-800">{totalAnimalesSold}</td>
+                        <td></td>
+                        <td className="px-5 py-3 text-right font-black text-stone-800">
+                          {totalKgSold.toLocaleString('es-AR')} kg
+                        </td>
+                        <td></td>
+                        <td className="px-5 py-3 text-right font-black text-emerald-700">
+                          {totalRevenue > 0 ? `$${totalRevenue.toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ======== MODALS ======== */}
 
